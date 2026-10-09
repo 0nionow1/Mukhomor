@@ -25,10 +25,12 @@ function Start-Worker {
     $arguments='--worker --base "'+$package+'" --root "'+$fixture+'" --output "'+(Join-Path $fixture 'worker-error.txt')+'"'
     $script:worker=Start-Process -FilePath $Executable -ArgumentList $arguments -WindowStyle Hidden -PassThru
     $ready=$false
-    for($n=0;$n -lt 15;$n++){
-        try {$snapshot=Request @{action='Status'}; if($snapshot.ok){$ready=$true;break};if($n -eq 14){Write-Host ('Startup Status: '+($snapshot|ConvertTo-Json -Depth 8 -Compress))}} catch {if($worker.HasExited){throw 'Worker exited during initialization'};if($n -eq 14){Write-Host ('Startup RPC failed: '+$_.Exception.Message)}}
+    $readiness=[Diagnostics.Stopwatch]::StartNew();$lastStartupError=''
+    while($readiness.Elapsed.TotalSeconds -lt 60){
+        try {$snapshot=Request @{action='Status'}; if($snapshot.ok){$ready=$true;break};$lastStartupError=$snapshot|ConvertTo-Json -Depth 8 -Compress} catch {if($worker.HasExited){throw 'Worker exited during initialization'};$lastStartupError=$_.Exception.Message}
         Start-Sleep -Milliseconds 200
     }
+    if(!$ready){Write-Host ('Startup did not become ready within 60 seconds: '+$lastStartupError)}
     Assert $ready 'worker starts with no imported profile'
 }
 function Test-SelectRollback {
