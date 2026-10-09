@@ -704,7 +704,7 @@ impl Bridge {
     }
     fn limit(&self, action: &str) -> Duration {
         let seconds = match action {
-            "Connect" | "Select" => 60,
+            "Connect" | "Select" | "Import" | "ApplySettings" => 60,
             "Disconnect" | "Exit" | "Init" => 20,
             "Snapshot" => 5,
             "Update" | "UpdateDns" => 25,
