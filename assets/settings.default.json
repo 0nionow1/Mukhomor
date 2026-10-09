@@ -1,0 +1,53 @@
+{
+  "direct": {
+    "domains": [],
+    "process_paths": [],
+    "process_names": [
+      "cod.exe",
+      "cs2.exe",
+      "deadlock.exe",
+      "dota2.exe",
+      "EscapeFromTarkov.exe",
+      "FortniteClient-Win64-Shipping.exe",
+      "HuntGame.exe",
+      "League of Legends.exe",
+      "Overwatch.exe",
+      "qbittorrent.exe",
+      "r5apex.exe",
+      "RainbowSix.exe",
+      "RainbowSix_Vulkan.exe",
+      "RocketLeague.exe",
+      "RustClient.exe",
+      "TslGame.exe",
+      "VALORANT-Win64-Shipping.exe"
+    ],
+    "domain_rule_sets": [
+      "russia",
+      "steam"
+    ],
+    "rule_set_exclusions": [
+      "ubs.com"
+    ],
+    "ip_cidrs": [],
+    "domain_suffixes": [
+      "ru",
+      "xn--p1ai"
+    ]
+  },
+  "ports": {
+    "proxy": 19890,
+    "dns": 19853,
+    "controller": 19893
+  },
+  "schema": 1,
+  "dns_update": {
+    "max_refresh_seconds": 900,
+    "min_refresh_seconds": 30,
+    "observe_subdomains": true,
+    "seed_hosts": [],
+    "max_addresses_per_host": 64,
+    "max_hosts": 512,
+    "max_stale_seconds": 86400,
+    "enabled": false
+  }
+}

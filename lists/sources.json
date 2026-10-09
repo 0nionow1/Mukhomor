@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "bundled_on": "2026-10-08",
+  "license": "GPL-3.0, Rules-LICENSE.txt",
+  "modified": "Sorted and exact duplicates removed; matching semantics preserved.",
+  "sources": {
+    "russia": {
+      "url": "https://github.com/MetaCubeX/meta-rules-dat/blob/meta/geo/geosite/category-ru.list",
+      "download_url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ru.list",
+      "modified": "2026-10-08T02:12:40Z",
+      "entries": 1105,
+      "active_by_default": true,
+      "interval_seconds": 21600
+    },
+    "steam": {
+      "url": "https://github.com/MetaCubeX/meta-rules-dat/blob/meta/geo/geosite/steam.list",
+      "download_url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/steam.list",
+      "modified": "2026-10-08T02:12:40Z",
+      "entries": 60,
+      "active_by_default": true,
+      "interval_seconds": 21600
+    },
+    "ozon": {
+      "url": "https://github.com/MetaCubeX/meta-rules-dat/blob/meta/geo/geosite/ozon.list",
+      "download_url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/ozon.list",
+      "modified": "2026-10-08T02:12:40Z",
+      "entries": 63,
+      "active_by_default": false,
+      "interval_seconds": 21600
+    }
+  }
+}

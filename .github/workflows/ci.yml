@@ -1,0 +1,43 @@
+name: Windows checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Public source boundary
+        run: .\tests\Test-PublicSource.ps1
+      - name: Install Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+      - name: Fetch verified dependencies
+        run: .\Fetch-Dependencies.ps1
+      - name: Rust tests
+        run: cargo +stable test --manifest-path .\native\Cargo.toml --locked
+      - name: Build release packages
+        run: .\Build-Release.ps1
+      - name: Isolated application checks
+        run: .\tests\Run-Checks.ps1
+      - name: Windows package privacy and integrity
+        run: .\tests\Test-ReleasePrivacy.ps1
+      - name: Source package privacy and integrity
+        run: |
+          $match=[regex]::Match([IO.File]::ReadAllText((Join-Path $PWD 'native\Cargo.toml')),'(?m)^version = "(\d+\.\d+\.\d+)"$')
+          if(!$match.Success){throw 'Missing Cargo version'}
+          .\tests\Test-ReleasePrivacy.ps1 -Archive ('.\dist\Mukhomor-'+$match.Groups[1].Value+'-source.zip')

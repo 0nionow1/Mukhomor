@@ -1,0 +1,74 @@
+name: Build release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate tag and release notes
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $tag=$env:RELEASE_TAG
+          if($tag -notmatch '^v(\d+\.\d+\.\d+)$'){throw 'Expected vX.Y.Z tag'}
+          $version=$Matches[1]
+          $cargo=[IO.File]::ReadAllText((Join-Path $PWD 'native\Cargo.toml'))
+          if($cargo -notmatch ('(?m)^version = "'+[regex]::Escape($version)+'"$')){throw 'Tag and Cargo version differ'}
+          $log=[IO.File]::ReadAllText((Join-Path $PWD 'CHANGELOG.md'))
+          $section=[regex]::Match($log,'(?ms)^## \['+[regex]::Escape($version)+'\][^\n]*\n(?<body>.*?)(?=^## |\z)')
+          if(!$section.Success -or !$section.Groups['body'].Value.Trim()){throw 'Missing release notes'}
+          [IO.File]::WriteAllText((Join-Path $env:RUNNER_TEMP 'release-notes.md'),$section.Groups['body'].Value.Trim(),(New-Object Text.UTF8Encoding($false)))
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value ('RELEASE_VERSION='+$version)
+      - name: Public source boundary
+        run: .\tests\Test-PublicSource.ps1
+      - name: Install Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+      - name: Fetch verified dependencies
+        run: .\Fetch-Dependencies.ps1
+      - name: Rust tests
+        run: cargo +stable test --manifest-path .\native\Cargo.toml --locked
+      - name: Build release packages
+        run: .\Build-Release.ps1 -Version $env:RELEASE_VERSION
+      - name: Isolated application checks
+        run: .\tests\Run-Checks.ps1
+      - name: Verify both archives
+        run: |
+          foreach($kind in @('windows-x64','source')){
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\tests\Test-ReleasePrivacy.ps1 -Archive ('.\dist\Mukhomor-'+$env:RELEASE_VERSION+'-'+$kind+'.zip')
+            if($LASTEXITCODE -ne 0){throw 'Package verification failed'}
+          }
+      - name: Save build artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Mukhomor-${{ env.RELEASE_VERSION }}
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+      - name: Create draft release with packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $files=@(Get-ChildItem -LiteralPath .\dist -File | Where-Object {$_.Name -match ('^Mukhomor-'+[regex]::Escape($env:RELEASE_VERSION)+'-(windows-x64|source)\.zip(\.sha256)?$')} | ForEach-Object {$_.FullName})
+          if($files.Count -ne 4){throw 'Expected exactly two archives and two checksums'}
+          & gh release create $env:RELEASE_TAG @files --verify-tag --draft --title ('Mukhomor '+$env:RELEASE_VERSION) --notes-file (Join-Path $env:RUNNER_TEMP 'release-notes.md')
+          if($LASTEXITCODE -ne 0){throw 'Draft release creation failed'}
