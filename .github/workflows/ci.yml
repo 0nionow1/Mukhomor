@@ -22,6 +22,8 @@ jobs:
           persist-credentials: false
       - name: Public source boundary
         run: .\tests\Test-PublicSource.ps1
+      - name: Bridge profile rollback isolation
+        run: .\tests\Test-NativeApp.ps1 -RecoveryOnly
       - name: Install Rust stable
         run: |
           rustup toolchain install stable --profile minimal --no-self-update

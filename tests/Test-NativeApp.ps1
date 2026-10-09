@@ -1,4 +1,4 @@
-﻿param([string]$Executable,[string]$Base)
+﻿param([string]$Executable,[string]$Base,[switch]$RecoveryOnly)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 $package=if($Base){[IO.Path]::GetFullPath($Base)}else{Split-Path -Parent $PSScriptRoot}
@@ -79,6 +79,13 @@ function Save-ProfileIndex($Index) {
         if(!$child.WaitForExit(30000)){throw 'Pure Select recovery fixture timed out'}
         if(!$stdout.Wait(1000) -or !$stderr.Wait(1000)){throw 'Pure Select recovery fixture output timed out'}
         $reply=$stdout.Result|ConvertFrom-Json
+        if($child.ExitCode -ne 1 -or $reply.ok -or $reply.error -ne 'ORIGINAL_SELECT_FAILURE' -or $reply.error_details.rollback_failures -notcontains 'profiles'){
+            # This child uses only pure mock functions and public fixture IDs.
+            # Its reply makes environment-specific fixture failures diagnosable.
+            Write-Host ('Pure recovery fixture exit: '+$child.ExitCode)
+            Write-Host $stdout.Result
+            Write-Host $stderr.Result
+        }
         Assert ($child.ExitCode -eq 1 -and !$reply.ok -and $reply.error -eq 'ORIGINAL_SELECT_FAILURE' -and $reply.error_details.rollback_failures -contains 'profiles') 'failed old-profile restoration preserves the original Select error and marks recovery failure'
         $saved=[IO.File]::ReadAllText((Join-Path $mockRoot 'runtime\mock-save.json'))|ConvertFrom-Json
         $restored=[IO.File]::ReadAllText((Join-Path $mockRoot 'private\profiles.json'))|ConvertFrom-Json
@@ -111,6 +118,7 @@ PersistentKeepalive = 25
 '@
 try {
     Test-SelectRollback
+    if($RecoveryOnly){Write-Host ('PASS: '+$passed+' pure Select rollback assertions');return}
     Start-Worker
     $fresh=Request @{action='Status'}
     Assert (!$fresh.data.running -and @($fresh.data.profiles).Count -eq 0) 'fresh install remains disconnected'
