@@ -58,6 +58,7 @@ try {
         [IO.File]::AppendAllText((Join-Path $release 'assets\settings.default.json'),'corruption')
         Assert (!(Test-PackageManifest $release)) 'source file corruption rejected'
         Write-Host ('PASS: '+$checks+' Git ignore, source privacy and integrity checks')
+        $global:LASTEXITCODE=0
         return
     }
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $release 'Install.ps1') -VerifyOnly
@@ -70,6 +71,9 @@ try {
     finally{$ErrorActionPreference=$previousAction}
     Assert ($LASTEXITCODE -ne 0) 'modified file rejected by installer'
     Write-Host ('PASS: '+$checks+' Git ignore, ZIP privacy and installer integrity checks')
+    # The tampered-package rejection above deliberately returns a nonzero
+    # native exit code. A successful test must not leak it to the CI shell.
+    $global:LASTEXITCODE=0
 }finally{
     $resolved=[IO.Path]::GetFullPath($fixture)
     if($resolved.StartsWith(([IO.Path]::GetFullPath($PSScriptRoot)+'\release-'),[StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::GetFileName($resolved) -match '^release-[a-f0-9]{32}$'){Remove-Item -LiteralPath $resolved -Recurse -Force}
