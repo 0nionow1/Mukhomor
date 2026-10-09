@@ -35,7 +35,8 @@ function Start-FixtureCore([string]$Root,[string]$ConfigPath,[string]$Name) {
     Test-CoreConfig $package $ConfigPath
     $process=Start-Process (Get-CorePath $package) -ArgumentList @('-d',('"'+$Root+'"'),'-f',('"'+$ConfigPath+'"')) -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $fixture ($Name+'.log')) -RedirectStandardError (Join-Path $fixture ($Name+'-error.log'))
     try {
-        for($n=0;$n -lt 40;$n++){
+        $readiness=[Diagnostics.Stopwatch]::StartNew()
+        while($readiness.Elapsed.TotalSeconds -lt 30){
             if($process.HasExited){throw ('Fixture '+$Name+' core exited before readiness')}
             try {Invoke-CoreApi $Root '/version' -TimeoutSeconds 1|Out-Null;return $process} catch {Start-Sleep -Milliseconds 100}
         }
@@ -48,7 +49,7 @@ function Start-FixtureCore([string]$Root,[string]$ConfigPath,[string]$Name) {
 function Proxy-Get([int]$ProxyPort,[int]$OriginPort) {
     $socket=New-Object Net.Sockets.TcpClient
     try {
-        $socket.Connect('127.0.0.1',$ProxyPort);$socket.ReceiveTimeout=4000;$socket.SendTimeout=4000
+        $socket.Connect('127.0.0.1',$ProxyPort);$socket.ReceiveTimeout=10000;$socket.SendTimeout=10000
         $stream=$socket.GetStream()
         $request=[Text.Encoding]::ASCII.GetBytes("GET http://127.0.0.1:$OriginPort/ HTTP/1.1`r`nHost: 127.0.0.1:$OriginPort`r`nConnection: close`r`n`r`n")
         $stream.Write($request,0,$request.Length)
@@ -69,11 +70,13 @@ try {
     [IO.Directory]::CreateDirectory($fixture)|Out-Null
     $env:MUKHOMOR_CORE_PATH=$corePath
     $originPortPath=Join-Path $fixture 'origin-port.txt'
-    $origin=Start-Process (Get-Command node.exe).Source -ArgumentList @(('"'+(Join-Path $PSScriptRoot 'local-origin.cjs')+'"'),('"'+$originPortPath+'"')) -WindowStyle Hidden -PassThru
-    for($n=0;$n -lt 40 -and !(Test-Path -LiteralPath $originPortPath);$n++){
+    $origin=Start-Process (Get-Command node.exe).Source -ArgumentList @(('"'+(Join-Path $PSScriptRoot 'local-origin.cjs')+'"'),('"'+$originPortPath+'"')) -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $fixture 'origin.log') -RedirectStandardError (Join-Path $fixture 'origin-error.log')
+    $readiness=[Diagnostics.Stopwatch]::StartNew()
+    while($readiness.Elapsed.TotalSeconds -lt 30 -and !(Test-Path -LiteralPath $originPortPath)){
         if($origin.HasExited){throw 'Local origin exited before readiness'}
         Start-Sleep -Milliseconds 100
     }
+    if(!(Test-Path -LiteralPath $originPortPath)){throw 'Local origin did not become ready within 30 seconds'}
     $originPort=[int][IO.File]::ReadAllText($originPortPath)
     $serverRoot=New-FixtureRoot 'server';$clientRoot=New-FixtureRoot 'client'
     $serverSettings=Get-SplitSettings $serverRoot;$clientSettings=Get-SplitSettings $clientRoot
@@ -105,7 +108,7 @@ try {
     Test-SplitProfileProxies $clientRoot @($nodes|ForEach-Object {$_.proxy})
     $server=Start-FixtureCore $serverRoot $serverPath 'server'
     $clientPath=Join-Path $clientRoot 'private\client.json'
-    $delayRoute='/proxies/AWG/delay?timeout=2500&url='+[Uri]::EscapeDataString("http://127.0.0.1:$originPort/")
+    $delayRoute='/proxies/AWG/delay?timeout=8000&url='+[Uri]::EscapeDataString("http://127.0.0.1:$originPort/")
     foreach($node in $nodes){
         $config=Client-Config $node.proxy;Write-AtomicJson $clientPath $config
         Assert (!$config.tun.enable -and !$config.dns.enable -and !$config.ntp.enable -and !$config['geo-auto-update'] -and !$config['rule-providers'].Count -and ($config|ConvertTo-Json -Depth 40 -Compress) -notmatch 'https?://' -and $config.rules.Count -eq 1 -and $config.rules[0] -eq 'MATCH,AWG') ($node.protocol+': isolated config forces protocol transport without external update URLs')
@@ -113,7 +116,16 @@ try {
             Test-CoreConfig $package $clientPath
             Invoke-CoreApi $clientRoot '/configs?force=true' 'PUT' @{path=$clientPath}|Out-Null
         }
-        $delay=Invoke-CoreApi $clientRoot $delayRoute -TimeoutSeconds 4
+        # Hosted Windows runners can pause newly started processes or a core
+        # reload. Retry only positive handshakes, with a bounded deadline;
+        # the wrong-password control below still has to fail without retries.
+        $delay=$null
+        for($attempt=1;$attempt -le 3;$attempt++){
+            try {$delay=Invoke-CoreApi $clientRoot $delayRoute -TimeoutSeconds 10;break} catch {
+                if($attempt -eq 3 -or $origin.HasExited -or $server.HasExited -or $client.HasExited){throw}
+                Start-Sleep -Milliseconds 250
+            }
+        }
         Assert ($null -ne $delay.delay -and $delay.delay -ge 0) ($node.protocol+': actual handshake passes the Mihomo HTTP health probe')
         $response=Proxy-Get $clientSettings.ports.proxy $originPort
         Assert ($response -match '^HTTP/1\.[01] 200 ' -and $response -match 'DIRECT_OK') ($node.protocol+': tunneled request reaches the HTTP origin')
@@ -128,14 +140,14 @@ try {
     Invoke-CoreApi $clientRoot '/version' -TimeoutSeconds 1|Out-Null
     Assert (!$origin.HasExited -and !$server.HasExited -and !$client.HasExited -and (Proxy-Get $originPort $originPort) -match 'DIRECT_OK') 'origin and both engines remain healthy before the credential rejection control'
     $healthRejected=$false
-    try {Invoke-CoreApi $clientRoot $delayRoute -TimeoutSeconds 4|Out-Null} catch {$healthRejected=$true}
+    try {Invoke-CoreApi $clientRoot $delayRoute -TimeoutSeconds 10|Out-Null} catch {$healthRejected=$true}
     Assert $healthRejected 'wrong SS credentials fail the actual HTTP health probe'
     $response='';try {$response=Proxy-Get $clientSettings.ports.proxy $originPort} catch {}
     Assert ($response -notmatch 'DIRECT_OK') 'wrong SS credentials cannot bypass the protocol and reach the origin'
     Write-Host ('PASS: '+$passed+' real loopback protocol assertions; TUN, system DNS and services unchanged')
 } catch {
     # These logs contain only this script's public loopback fixture credentials.
-    foreach($name in @('server.log','server-error.log','client.log','client-error.log')){
+    foreach($name in @('origin.log','origin-error.log','server.log','server-error.log','client.log','client-error.log')){
         $path=Join-Path $fixture $name
         if(Test-Path -LiteralPath $path){Write-Host $name;Get-Content -LiteralPath $path -Tail 12|Write-Host}
     }

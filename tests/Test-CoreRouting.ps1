@@ -42,7 +42,8 @@ $origin=$null; $core=$null
 try {
     $originPortPath=Join-Path $fixture 'origin-port.txt'
     $origin=Start-Process (Get-Command node.exe).Source -ArgumentList @(('"'+(Join-Path $PSScriptRoot 'local-origin.cjs')+'"'),('"'+$originPortPath+'"')) -WindowStyle Hidden -PassThru
-    for ($i=0;$i -lt 40 -and !(Test-Path -LiteralPath $originPortPath);$i++) { Start-Sleep -Milliseconds 100 }
+    for ($i=0;$i -lt 300 -and !(Test-Path -LiteralPath $originPortPath);$i++) { if($origin.HasExited){throw 'Origin exited before readiness'}; Start-Sleep -Milliseconds 100 }
+    if(!(Test-Path -LiteralPath $originPortPath)){throw 'Local origin did not become ready within 30 seconds'}
     $originPort=[int](Get-Content -LiteralPath $originPortPath -Raw)
     $core=Start-Process (Get-CorePath $root) -ArgumentList @('-d',('"'+$fixture+'"'),'-f',('"'+$configPath+'"')) -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $fixture 'core.log') -RedirectStandardError (Join-Path $fixture 'core-error.log')
     $ready=$false
