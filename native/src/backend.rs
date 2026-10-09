@@ -705,10 +705,11 @@ impl Bridge {
     fn limit(&self, action: &str) -> Duration {
         let seconds = match action {
             "Connect" | "Select" | "Import" | "ApplySettings" => 60,
-            "Disconnect" | "Exit" | "Init" => 20,
-            "Snapshot" => 5,
+            "Init" => 60,
+            "Disconnect" | "Exit" => 20,
+            "Snapshot" => 15,
             "Update" | "UpdateDns" => 25,
-            _ => 15,
+            _ => 30,
         };
         let normal = Duration::from_secs(seconds);
         if self.root.join("qa.marker").exists()

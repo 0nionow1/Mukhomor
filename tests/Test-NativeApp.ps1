@@ -142,6 +142,7 @@ try {
     $idB=@($second.data.profiles|Where-Object {$_.id -ne $idA})[0].id
     $unicode=-join ([char[]](0x0422,0x0435,0x0441,0x0442,0x0020,0x0411))
     $rename=Request @{action='Rename';id=$idB;name=$unicode}
+    if(!$rename.ok){Write-Host ('Public fixture rename failure: '+$rename.error)}
     Assert ($rename.ok -and @($rename.data.profiles|Where-Object {$_.id -eq $idB})[0].name -eq $unicode) 'Unicode server names survive IPC'
     $bad=Request @{action='Import';name='Bad';content='PRIVATE-CANARY-NATIVE-DIAGNOSTICS-invalid-profile'}
     Assert (!$bad.ok) 'malformed profile rejected'
