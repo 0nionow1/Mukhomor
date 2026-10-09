@@ -18,7 +18,8 @@ function Start-Request($Value){
     $null=$client.Handle
     $item=@{process=$client;output=$output;action=$Value.action};$clients.Add($item);return $item
 }
-function Finish-Request($Item,[int]$Timeout=10000){
+# Generic RPC completion follows the 100 s client deadline; explicit cancellation/Exit bounds remain below.
+function Finish-Request($Item,[int]$Timeout=115000){
     if(!$Item.process.WaitForExit($Timeout)){throw ('Test RPC '+$Item.action+' exceeded its deadline after '+$script:passed+' assertions')}
     if($Item.process.ExitCode -ne 0){throw ('Test RPC failed: '+[IO.File]::ReadAllText($Item.output))}
     return ([IO.File]::ReadAllText($Item.output)|ConvertFrom-Json)

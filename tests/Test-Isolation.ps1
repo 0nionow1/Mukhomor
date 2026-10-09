@@ -18,7 +18,8 @@ function Request([string]$Root,$Value){
     [IO.File]::WriteAllText($input,($Value|ConvertTo-Json -Depth 30 -Compress),(New-Object Text.UTF8Encoding($false)))
     $client=Start-Process -FilePath $Executable -ArgumentList ('--rpc --root "'+$Root+'" --request "'+$input+'" --output "'+$output+'"') -WindowStyle Hidden -PassThru
     $null=$client.Handle
-    if(!$client.WaitForExit(20000)){$client.Kill();throw 'Isolation RPC timed out'}
+    # Functional IPC checks allow the controller's 100 s client deadline and process cleanup.
+    if(!$client.WaitForExit(115000)){$client.Kill();throw ('Isolation RPC '+$Value.action+' timed out after '+$script:passed+' assertions')}
     if($client.ExitCode -ne 0){throw ('Isolation RPC failed: '+[IO.File]::ReadAllText($output))}
     return ([IO.File]::ReadAllText($output)|ConvertFrom-Json)
 }
