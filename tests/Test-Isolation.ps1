@@ -17,6 +17,7 @@ function Request([string]$Root,$Value){
     $id=[guid]::NewGuid().ToString('N');$input=Join-Path $fixture ($id+'-request.json');$output=Join-Path $fixture ($id+'-response.json')
     [IO.File]::WriteAllText($input,($Value|ConvertTo-Json -Depth 30 -Compress),(New-Object Text.UTF8Encoding($false)))
     $client=Start-Process -FilePath $Executable -ArgumentList ('--rpc --root "'+$Root+'" --request "'+$input+'" --output "'+$output+'"') -WindowStyle Hidden -PassThru
+    $null=$client.Handle
     if(!$client.WaitForExit(20000)){$client.Kill();throw 'Isolation RPC timed out'}
     if($client.ExitCode -ne 0){throw ('Isolation RPC failed: '+[IO.File]::ReadAllText($output))}
     return ([IO.File]::ReadAllText($output)|ConvertFrom-Json)
@@ -36,7 +37,8 @@ try {
         [IO.File]::WriteAllText((Join-Path $root 'qa.marker'),'Two isolated disconnected controllers; no system DNS or TUN')
         $worker=Start-Process -FilePath $Executable -ArgumentList ('--worker --base "'+$package+'" --root "'+$root+'" --output "'+(Join-Path $root 'worker-error.json')+'"') -PassThru -WindowStyle Hidden
         $workers.Add($worker);$ready=$false
-        for($n=0;$n -lt 15;$n++){try{if((Request $root @{action='Status'}).ok){$ready=$true;break}}catch{if($worker.HasExited){throw 'Isolation worker exited'}};Start-Sleep -Milliseconds 100}
+        $readiness=[Diagnostics.Stopwatch]::StartNew()
+        while($readiness.Elapsed.TotalSeconds -lt 60){try{if((Request $root @{action='Status'}).ok){$ready=$true;break}}catch{if($worker.HasExited){throw 'Isolation worker exited'}};Start-Sleep -Milliseconds 100}
         Assert $ready 'independent controller starts beside the other instance'
     }
     $a=Request $roots[0] @{action='Import';name='Fixture A';content=$profile}

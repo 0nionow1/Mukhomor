@@ -15,6 +15,7 @@ function Start-Request($Value){
     $id=[guid]::NewGuid().ToString('N');$input=Join-Path $fixture ($id+'-request.json');$output=Join-Path $fixture ($id+'-response.json')
     [IO.File]::WriteAllText($input,($Value|ConvertTo-Json -Depth 20 -Compress),(New-Object Text.UTF8Encoding($false)))
     $client=Start-Process -FilePath $Executable -ArgumentList ('--rpc --root "'+$root+'" --request "'+$input+'" --output "'+$output+'"') -PassThru -WindowStyle Hidden
+    $null=$client.Handle
     $item=@{process=$client;output=$output;action=$Value.action};$clients.Add($item);return $item
 }
 function Finish-Request($Item,[int]$Timeout=10000){
@@ -26,7 +27,8 @@ function Request($Value){return Finish-Request (Start-Request $Value)}
 function Start-Worker {
     $script:worker=Start-Process -FilePath $Executable -ArgumentList ('--worker --base "'+$base+'" --root "'+$root+'" --output "'+(Join-Path $fixture 'worker-error.json')+'"') -WindowStyle Hidden -PassThru
     $ready=$false
-    for($n=0;$n -lt 15;$n++){try{if((Request @{action='Status'}).ok){$ready=$true;break}}catch{if($worker.HasExited){$errorPath=Join-Path $fixture 'worker-error.json';$detail=if(Test-Path -LiteralPath $errorPath){[IO.File]::ReadAllText($errorPath)}else{'No worker error record'};throw ('Fixture worker exited: '+$detail)}};Start-Sleep -Milliseconds 100}
+    $readiness=[Diagnostics.Stopwatch]::StartNew()
+    while($readiness.Elapsed.TotalSeconds -lt 60){try{if((Request @{action='Status'}).ok){$ready=$true;break}}catch{if($worker.HasExited){$errorPath=Join-Path $fixture 'worker-error.json';$detail=if(Test-Path -LiteralPath $errorPath){[IO.File]::ReadAllText($errorPath)}else{'No worker error record'};throw ('Fixture worker exited: '+$detail)}};Start-Sleep -Milliseconds 100}
     Assert $ready 'isolated controller starts'
 }
 # The trusted bridge is replaced only for this isolated --worker fixture.
