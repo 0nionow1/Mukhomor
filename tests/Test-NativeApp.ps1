@@ -74,7 +74,9 @@ function Save-ProfileIndex($Index) {
         [void]$child.Start()
         $stdout=$child.StandardOutput.ReadToEndAsync();$stderr=$child.StandardError.ReadToEndAsync()
         $child.StandardInput.WriteLine((@{action='Select';id=$targetId}|ConvertTo-Json -Compress));$child.StandardInput.Close()
-        if(!$child.WaitForExit(5000)){throw 'Pure Select recovery fixture timed out'}
+        # This is a functional recovery check, not a startup latency assertion.
+        # Allow cold PowerShell/module loading on hosted Windows runners.
+        if(!$child.WaitForExit(30000)){throw 'Pure Select recovery fixture timed out'}
         if(!$stdout.Wait(1000) -or !$stderr.Wait(1000)){throw 'Pure Select recovery fixture output timed out'}
         $reply=$stdout.Result|ConvertFrom-Json
         Assert ($child.ExitCode -eq 1 -and !$reply.ok -and $reply.error -eq 'ORIGINAL_SELECT_FAILURE' -and $reply.error_details.rollback_failures -contains 'profiles') 'failed old-profile restoration preserves the original Select error and marks recovery failure'
@@ -129,7 +131,7 @@ try {
     $detailRaw=[IO.File]::ReadAllText($detailPath)
     $detail=$detailRaw|ConvertFrom-Json
     Assert ($detail.schema -eq 1 -and $detail.action -eq 'Import' -and $detail.script -in @('SplitVpn.psm1','ProfileImport.psm1') -and $detail.line -gt 0 -and $detail.exception_type) 'diagnostics identifies the actual failure stage and source location'
-    Assert (!$detailRaw.Contains('PRIVATE-CANARY-NATIVE-DIAGNOSTICS') -and !$detailRaw.Contains($fixture) -and !$detailRaw.Contains('eCtXsJZ27') -and !$detailRaw.Contains('Cr8hWlKvt')) 'diagnostics excludes source lines, request content, profile values and local paths'
+    Assert (!$detailRaw.Contains('PRIVATE-CANARY-NATIVE-DIAGNOSTICS') -and !$detailRaw.Contains($fixture) -and !$detailRaw.Contains('QUFBQUFBQUFB') -and !$detailRaw.Contains('Cr8hWlKvt')) 'diagnostics excludes source lines, request content, profile values and local paths'
     Assert (@($detail.PSObject.Properties.Name|Where-Object {$_ -notin @('schema','action','exception_type','hresult','provider_code','command','script','line','rollback_failures','utc')}).Count -eq 0) 'diagnostics contains only typed codes, location and safe rollback labels'
     $snapshot=Request @{action='Status'}
     Assert (@($snapshot.data.profiles).Count -eq 2 -and $snapshot.data.selected -eq $idA) 'failed import retains library and active selection'
@@ -161,7 +163,7 @@ try {
     Assert ($switch.ok -and $switch.data.selected -eq $idB) 'profile switches while disconnected'
     Assert ($switch.data.settings.direct.domains -contains 'exact.example.com' -and $switch.data.settings.dns_update.min_refresh_seconds -eq 45) 'switch preserves exclusions and DNS preferences'
     $public=$switch|ConvertTo-Json -Depth 40
-    Assert (!$public.Contains('eCtXsJZ27') -and !$public.Contains('private-key') -and !$public.Contains('secret')) 'IPC status excludes profile keys and controller token'
+    Assert (!$public.Contains('QUFBQUFBQUFB') -and !$public.Contains('private-key') -and !$public.Contains('secret')) 'IPC status excludes profile keys and controller token'
     # Decoded profile size and JSON transport size are separate limits.
     # WG ignores this comment; JSON must escape each control byte to six bytes.
     $escapedContent=$profile+"`n#"+(([string][char]1)*200000)
