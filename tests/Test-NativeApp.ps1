@@ -62,18 +62,25 @@ function Save-ProfileIndex($Index) {
 '@
     Assert ($source.Contains('$request=@{}')) 'the pure Select recovery fixture locates the real bridge entry point'
     $source=$source.Replace('$request=@{}',($mocks+"`n"+'$request=@{}'))
+    # This fault-injection fixture tests Select recovery, while the native RPC
+    # checks below cover the real stdin transport. Feed its public request via
+    # a file to avoid inheriting the hosted PowerShell shell's input stream.
+    $inputPath=Join-Path $mockRoot 'select-request.json'
+    [IO.File]::WriteAllText($inputPath,(@{action='Select';id=$targetId}|ConvertTo-Json -Compress),(New-Object Text.UTF8Encoding($false)))
+    $inputExpression="`$raw=[IO.File]::ReadAllText('"+$inputPath.Replace("'","''")+"')"
+    Assert ($source.Contains('$raw=[Console]::In.ReadToEnd()')) 'the pure Select fixture locates the request reader'
+    $source=$source.Replace('$raw=[Console]::In.ReadToEnd()',$inputExpression)
     $scriptPath=Join-Path $mockRoot 'bridge-fixture.ps1'
     [IO.File]::WriteAllText($scriptPath,$source,(New-Object Text.UTF8Encoding($true)))
     $info=New-Object Diagnostics.ProcessStartInfo
     $info.FileName=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    $info.Arguments='-NoProfile -ExecutionPolicy Bypass -File "'+$scriptPath+'" -Root "'+$mockRoot+'"'
+    $info.Arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$scriptPath+'" -Root "'+$mockRoot+'"'
     $info.UseShellExecute=$false;$info.CreateNoWindow=$true
-    $info.RedirectStandardInput=$true;$info.RedirectStandardOutput=$true;$info.RedirectStandardError=$true
+    $info.RedirectStandardOutput=$true;$info.RedirectStandardError=$true
     $child=New-Object Diagnostics.Process;$child.StartInfo=$info
     try {
         [void]$child.Start()
         $stdout=$child.StandardOutput.ReadToEndAsync();$stderr=$child.StandardError.ReadToEndAsync()
-        $child.StandardInput.WriteLine((@{action='Select';id=$targetId}|ConvertTo-Json -Compress));$child.StandardInput.Close()
         # This is a functional recovery check, not a startup latency assertion.
         # Allow cold PowerShell/module loading on hosted Windows runners.
         if(!$child.WaitForExit(30000)){throw 'Pure Select recovery fixture timed out'}
