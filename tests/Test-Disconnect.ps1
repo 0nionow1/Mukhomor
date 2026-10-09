@@ -391,11 +391,13 @@ try {
 '@,(New-Object Text.UTF8Encoding($false)))
     $foreign=Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList ('-NoProfile -ExecutionPolicy Bypass -File "'+$serverScript+'" -PipeName '+[MukhomorFixturePipe]::Name($foreignRoot)+' -Ready "'+$serverReady+'"') -PassThru -WindowStyle Hidden
     $clients.Add(@{process=$foreign;output='';action='Foreign fixture server'})
-    for($n=0;$n -lt 100 -and !(Test-Path -LiteralPath $serverReady);$n++){Start-Sleep -Milliseconds 30}
+    $readiness=[Diagnostics.Stopwatch]::StartNew()
+    while($readiness.Elapsed.TotalSeconds -lt 60 -and !(Test-Path -LiteralPath $serverReady)){if($foreign.HasExited){throw 'Foreign fixture server exited before readiness'};Start-Sleep -Milliseconds 100}
     if(!(Test-Path -LiteralPath $serverReady)){throw 'Foreign fixture server did not start'}
     $foreignRequest=Join-Path $foreignRoot 'request.json';$foreignReply=Join-Path $foreignRoot 'reply.json'
     [IO.File]::WriteAllText($foreignRequest,'{"action":"Status"}',(New-Object Text.UTF8Encoding($false)))
     $probe=Start-Process -FilePath $Executable -ArgumentList ('--rpc --root "'+$foreignRoot+'" --request "'+$foreignRequest+'" --output "'+$foreignReply+'"') -PassThru -WindowStyle Hidden
+    $null=$probe.Handle
     $clients.Add(@{process=$probe;output=$foreignReply;action='Foreign endpoint client'})
     if(!$probe.WaitForExit(5000)){throw 'Foreign endpoint client exceeded its deadline'}
     $foreignResult=[IO.File]::ReadAllText($foreignReply)|ConvertFrom-Json
