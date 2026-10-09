@@ -740,7 +740,7 @@ impl Bridge {
         let mut child = Command::new(
             PathBuf::from(system).join("System32/WindowsPowerShell/v1.0/powershell.exe"),
         )
-        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+        .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"])
         .arg(script)
         .arg("-Root")
         .arg(&self.root)

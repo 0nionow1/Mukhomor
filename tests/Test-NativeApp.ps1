@@ -71,8 +71,8 @@ function Save-ProfileIndex($Index) {
     $inputPath=Join-Path $mockRoot 'select-request.json'
     [IO.File]::WriteAllText($inputPath,(@{action='Select';id=$targetId}|ConvertTo-Json -Compress),(New-Object Text.UTF8Encoding($false)))
     $inputExpression="`$raw=[IO.File]::ReadAllText('"+$inputPath.Replace("'","''")+"')"
-    Assert ($source.Contains('$raw=[Console]::In.ReadToEnd()')) 'the pure Select fixture locates the request reader'
-    $source=$source.Replace('$raw=[Console]::In.ReadToEnd()',$inputExpression)
+    Assert ($source.Contains('$raw=$inputReader.ReadToEnd()')) 'the pure Select fixture locates the request reader'
+    $source=$source.Replace('$raw=$inputReader.ReadToEnd()',$inputExpression)
     $scriptPath=Join-Path $mockRoot 'bridge-fixture.ps1'
     [IO.File]::WriteAllText($scriptPath,$source,(New-Object Text.UTF8Encoding($true)))
     $info=New-Object Diagnostics.ProcessStartInfo
@@ -134,6 +134,7 @@ try {
     Assert (!$fresh.data.running -and @($fresh.data.profiles).Count -eq 0) 'fresh install remains disconnected'
     Assert ($fresh.data.settings.direct.process_names -contains 'qbittorrent.exe') 'public torrent bypass preset'
     $first=Request @{action='Import';name='Test A';content=$profile}
+    if(!$first.ok){Write-Host ('Public fixture import failure: '+$first.error)}
     Assert ($first.ok -and @($first.data.profiles).Count -eq 1) 'first profile imported'
     $idA=$first.data.selected
     $second=Request @{action='Import';name='Test B';content=$profile.Replace('192.0.2.1','192.0.2.2')}

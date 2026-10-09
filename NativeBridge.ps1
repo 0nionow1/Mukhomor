@@ -65,7 +65,10 @@ function Get-FailureDetails($Failure, [string]$Action) {
 
 $request=@{}
 try {
-    $raw=[Console]::In.ReadToEnd()
+    # Read the native pipe directly with its declared UTF-8 encoding instead
+    # of using the PowerShell host's console text reader.
+    $inputReader=[IO.StreamReader]::new([Console]::OpenStandardInput(),(New-Object Text.UTF8Encoding($false,$true)))
+    try {$raw=$inputReader.ReadToEnd()} finally {$inputReader.Dispose()}
     if ($raw.Length -gt 4194304) {throw 'Request is too large'}
     $request=Convert-ToMap ($raw | ConvertFrom-Json)
     if (!(Test-Path -LiteralPath (Join-Path $Root 'settings.json'))) {
