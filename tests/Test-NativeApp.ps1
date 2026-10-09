@@ -15,6 +15,7 @@ function Request($Value) {
     if(Test-Path -LiteralPath $output){[IO.File]::Delete($output)}
     $arguments='--rpc --root "'+$fixture+'" --request "'+$request+'" --output "'+$output+'"'
     $client=Start-Process -FilePath $Executable -ArgumentList $arguments -WindowStyle Hidden -PassThru
+    $null=$client.Handle
     if(!$client.WaitForExit(155000)) {$client.Kill();throw 'RPC timed out'}
     $raw=[IO.File]::ReadAllText($output)
     if($client.ExitCode -ne 0){throw ('RPC '+$Value.action+' failed: '+$raw)}
@@ -25,7 +26,7 @@ function Start-Worker {
     $script:worker=Start-Process -FilePath $Executable -ArgumentList $arguments -WindowStyle Hidden -PassThru
     $ready=$false
     for($n=0;$n -lt 15;$n++){
-        try {$snapshot=Request @{action='Status'}; if($snapshot.ok){$ready=$true;break}} catch {if($worker.HasExited){throw 'Worker exited during initialization'}}
+        try {$snapshot=Request @{action='Status'}; if($snapshot.ok){$ready=$true;break};if($n -eq 14){Write-Host ('Startup Status: '+($snapshot|ConvertTo-Json -Depth 8 -Compress))}} catch {if($worker.HasExited){throw 'Worker exited during initialization'};if($n -eq 14){Write-Host ('Startup RPC failed: '+$_.Exception.Message)}}
         Start-Sleep -Milliseconds 200
     }
     Assert $ready 'worker starts with no imported profile'
