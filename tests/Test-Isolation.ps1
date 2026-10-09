@@ -59,11 +59,13 @@ try {
     }
     $removed=Request $roots[0] @{action='Remove';id=$a.data.selected}
     Assert ($removed.ok -and (Request $roots[1] @{action='Status'}).data.profiles.Count -eq 1) 'removing A profile leaves B profile intact'
+    # ShutdownWorker acknowledges before cleanup; its Disconnect helper has a 20 s hard limit.
+    # Give that bounded cleanup time to finish on a cold Windows runner.
     Request $roots[0] @{action='ShutdownWorker'}|Out-Null
-    Assert ($workers[0].WaitForExit(15000) -and (Request $roots[1] @{action='Status'}).ok) 'stopping controller A leaves B IPC available'
+    Assert ($workers[0].WaitForExit(30000) -and (Request $roots[1] @{action='Status'}).ok) 'stopping controller A leaves B IPC available'
     foreach($file in $before.Keys){Assert ((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash -eq $before[$file]) 'neighbouring legacy private file is byte-for-byte unchanged'}
     Request $roots[1] @{action='ShutdownWorker'}|Out-Null
-    Assert ($workers[1].WaitForExit(15000)) 'controller B exits separately'
+    Assert ($workers[1].WaitForExit(30000)) 'controller B exits separately'
     Write-Host ('PASS: '+$passed+' functional root / IPC / profile / rule isolation assertions; no TUN or system DNS')
 } finally {
     foreach($worker in $workers){if(!$worker.HasExited){$worker.Kill();$worker.WaitForExit()}}

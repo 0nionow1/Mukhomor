@@ -293,8 +293,10 @@ try {
     $worker.Refresh();$cpuDelta=$worker.TotalProcessorTime.TotalMilliseconds-$cpuBefore
     Assert ($cpuDelta -lt 150) 'idle controller waits on events rather than polling PowerShell'
     $metrics=@{working_set_mb=[math]::Round($worker.WorkingSet64/1MB,2);private_mb=[math]::Round($worker.PrivateMemorySize64/1MB,2);idle_cpu_ms_over_5s=[math]::Round($cpuDelta,2);core_connected=$false}
+    # ShutdownWorker acknowledges before cleanup; its Disconnect helper has a 20 s hard limit.
+    # Give that bounded cleanup time to finish on a cold Windows runner.
     Request @{action='ShutdownWorker'}|Out-Null
-    Assert ($worker.WaitForExit(15000)) 'controller shuts down cleanly'
+    Assert ($worker.WaitForExit(30000)) 'controller shuts down cleanly'
     # Model an on-disk library created before normalized node storage existed.
     # Change only this stopped worker's TEST-NET fixture, retaining its IDs.
     $legacyIndex=[IO.File]::ReadAllText($libraryPath)|ConvertFrom-Json
@@ -333,8 +335,10 @@ try {
     Assert (Request @{action='ApplySettings';settings=$beforeLarge}).ok 'large-list apply can restore the previous preferences without altering the selected profile'
     $remove=Request @{action='Remove';id=$idA}
     Assert ($remove.ok -and @($remove.data.profiles).Count -eq 1 -and $remove.data.selected -eq $idB) 'remove inactive profile preserves selection'
+    # ShutdownWorker acknowledges before cleanup; its Disconnect helper has a 20 s hard limit.
+    # Give that bounded cleanup time to finish on a cold Windows runner.
     Request @{action='ShutdownWorker'}|Out-Null
-    Assert ($worker.WaitForExit(15000)) 'restarted controller shuts down cleanly'
+    Assert ($worker.WaitForExit(30000)) 'restarted controller shuts down cleanly'
     [IO.Directory]::CreateDirectory((Join-Path $package 'runtime'))|Out-Null
     [IO.File]::WriteAllText((Join-Path $package 'runtime\native-test-results.json'),(@{assertions=$passed;metrics=$metrics;network_tun_tested=$false}|ConvertTo-Json -Depth 6))
     Write-Host ('PASS: '+$passed+' native IPC / profile / persistence / routing assertions')

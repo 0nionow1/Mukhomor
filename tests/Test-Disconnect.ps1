@@ -185,8 +185,10 @@ try {
             Assert ($fresh.ok -and $fresh.data.running -and !$fresh.data.busy -and !(Test-Path -LiteralPath (Join-Path $root 'runtime\stop.request'))) ('cycle '+$cycle+' reconnects with fresh cancellation state')
             Assert (Request @{action='Disconnect'}).ok ('cycle '+$cycle+' disconnects again without controller restart')
         }
+        # ShutdownWorker acknowledges before cleanup; its Disconnect helper has a 20 s hard limit.
+        # Give that bounded cleanup time to finish on a cold Windows runner.
         Request @{action='ShutdownWorker'}|Out-Null
-        Assert ($worker.WaitForExit(5000)) 'cancellation fixture stops all its own descendants'
+        Assert ($worker.WaitForExit(30000)) 'cancellation fixture stops all its own descendants'
         Write-Host ('PASS: '+$passed+' isolated cancellation reset assertions; no TUN, DNS or service changes')
         return
     }
@@ -225,8 +227,10 @@ try {
         $unicode=Request @{action='Connect';fast=$true;unicodeFailure=$true;request_id='unicode-error-frame-fixture'}
         $expected=-join [char[]](0x0422,0x0435,0x0441,0x0442,13,10,0x65e5,0x672c)
         Assert (!$unicode.ok -and $unicode.error -ceq $expected) 'framed errors retain exact Unicode and embedded CRLF details'
+        # ShutdownWorker acknowledges before cleanup; its Disconnect helper has a 20 s hard limit.
+        # Give that bounded cleanup time to finish on a cold Windows runner.
         Request @{action='ShutdownWorker'}|Out-Null
-        Assert ($worker.WaitForExit(5000)) 'framing fixture shuts down all its supervised descendants'
+        Assert ($worker.WaitForExit(30000)) 'framing fixture shuts down all its supervised descendants'
         Write-Host ('PASS: '+$passed+' isolated bridge framing assertions; no TUN, DNS or service changes')
         return
     }
@@ -252,7 +256,7 @@ try {
     $mock=Get-Content -LiteralPath (Join-Path $root 'runtime\mock-state.json') -Raw|ConvertFrom-Json
     Assert ($mock.connections -eq 1 -and !(Request @{action='Status'}).data.running) 'manual disconnect suppresses retry despite enabled autoconnect'
     Request @{action='ShutdownWorker'}|Out-Null
-    Assert ($worker.WaitForExit(15000)) 'disconnected controller stops before its restart test'
+    Assert ($worker.WaitForExit(30000)) 'disconnected controller stops before its restart test'
     Start-Worker
     $restart=Request @{action='Status'}
     $saved=Get-Content -LiteralPath (Join-Path $root 'runtime\connection-intent.json') -Raw|ConvertFrom-Json
@@ -265,7 +269,7 @@ try {
     $recovered=Request @{action='Disconnect'}
     Assert ($recovered.ok -and $recovered.data.phase -eq 'idle') 'network recovery can be retried through the same disconnect action'
     Request @{action='ShutdownWorker'}|Out-Null
-    Assert ($worker.WaitForExit(15000)) 'controller exits after cancellation tests'
+    Assert ($worker.WaitForExit(30000)) 'controller exits after cancellation tests'
     [IO.File]::WriteAllText((Join-Path $root 'runtime\qa-system-boot.marker'),'Model SCM AUTO/DELAYEDAUTO reason, never actual system startup')
     [IO.File]::WriteAllText((Join-Path $root 'runtime\fast-startup.marker'),'No tunnel, immediate fixture success')
     Start-Worker
@@ -276,7 +280,7 @@ try {
     Assert $bootSaved.desired 'actual boot persists desired connection before its automatic attempt'
     Request @{action='Disconnect'}|Out-Null
     Request @{action='ShutdownWorker'}|Out-Null
-    Assert ($worker.WaitForExit(15000)) 'boot-mode fixture shuts down without a real VPN'
+    Assert ($worker.WaitForExit(30000)) 'boot-mode fixture shuts down without a real VPN'
     [IO.File]::Delete((Join-Path $root 'runtime\qa-system-boot.marker'))
     [IO.File]::WriteAllText((Join-Path $root 'runtime\connection-intent.json'),'Damaged synthetic intent record')
     Start-Worker
@@ -339,7 +343,7 @@ try {
     Assert ($blockedReply.cancelled -and $inputOffReply.ok -and $inputClock.ElapsedMilliseconds -lt 4500) 'Disconnect cancels a blocked helper stdin write without waiting for the helper sleep'
 
     Request @{action='ShutdownWorker'}|Out-Null
-    Assert ($worker.WaitForExit(15000)) 'damaged-state fixture shuts down'
+    Assert ($worker.WaitForExit(30000)) 'damaged-state fixture shuts down'
     [IO.Directory]::CreateDirectory((Join-Path $root 'runtime\connection-intent.json.pending'))|Out-Null
     Start-Worker
     $persistFailed=Request @{action='Status'}
@@ -403,7 +407,7 @@ try {
     $foreignResult=[IO.File]::ReadAllText($foreignReply)|ConvertFrom-Json
     Assert ($probe.ExitCode -ne 0 -and !$foreignResult.ok -and $foreignResult.error -eq 'The IPC endpoint does not belong to the installed Mukhomor service') 'valid framed responses from a foreign pipe server are rejected before accepting state'
     Request @{action='ShutdownWorker'}|Out-Null
-    Assert ($worker.WaitForExit(15000)) 'persistence-error fixture shuts down'
+    Assert ($worker.WaitForExit(30000)) 'persistence-error fixture shuts down'
 
     [IO.File]::WriteAllText((Join-Path $root 'runtime\fail-init.marker'),'Synthetic failed startup helper')
     Start-Worker
