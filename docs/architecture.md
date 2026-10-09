@@ -44,4 +44,4 @@ flowchart TD
 
 Git публикует только разрешённые исходники. Релиз собирается по явным спискам файлов, с проверкой SHA256 зависимостей и манифестом каждого пакета. Приватные конфиги не являются входом сборки. Новую документацию и тесты нужно включать в список упаковки; [инструкция выпуска](releasing.md) описывает проверку.
 
-Помощник запускается с -NonInteractive и читает JSON как UTF-8 непосредственно из стандартного байтового потока ([Console.OpenStandardInput](https://learn.microsoft.com/en-us/dotnet/api/system.console.openstandardinput?view=netframework-4.8.1)). Это сохраняет заданную кодировку независимо от текстового reader оболочки PowerShell.
+Помощник запускается с `-NonInteractive`, читает и записывает JSON как UTF-8 непосредственно через стандартные байтовые потоки ([Console.OpenStandardInput](https://learn.microsoft.com/en-us/dotnet/api/system.console.openstandardinput?view=netframework-4.8.1)). Кодировка обмена не зависит от текстовых настроек оболочки PowerShell.

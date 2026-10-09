@@ -63,6 +63,14 @@ function Get-FailureDetails($Failure, [string]$Action) {
     return @{schema=1;action=$Action;exception_type=$Failure.Exception.GetType().FullName;hresult=$Failure.Exception.HResult.ToString('X8');provider_code=$providerCode;command=$command;script=$scriptName;line=$(if ($invocation -and $scriptName) {[int]$invocation.ScriptLineNumber} else {0});rollback_failures=$rollback;utc=[datetime]::UtcNow.ToString('o')}
 }
 
+function Write-BridgeReply($Value,[int]$Depth=40) {
+    $json=$Value|ConvertTo-Json -Depth $Depth -Compress
+    $bytes=[Text.Encoding]::UTF8.GetBytes($json+"`n")
+    $outputStream=[Console]::OpenStandardOutput()
+    $outputStream.Write($bytes,0,$bytes.Length)
+    $outputStream.Flush()
+}
+
 $request=@{}
 try {
     # Read the native pipe directly with its declared UTF-8 encoding instead
@@ -198,14 +206,12 @@ try {
     $snapshot=if($request.action -eq 'ApplySettings'){Get-Snapshot -ValidatedSettings $s}else{Get-Snapshot}
     if ($importedCount -gt 0) {$snapshot.imported_count=$importedCount}
     if($recoveryError){$snapshot.last_error=$recoveryError}
-    [Console]::WriteLine((@{ok=$true;data=$snapshot} | ConvertTo-Json -Depth 40 -Compress))
-    [Console]::Out.Flush()
+    Write-BridgeReply @{ok=$true;data=$snapshot}
 } catch {
     $failure=$_
     $action=if ($request -is [System.Collections.IDictionary] -and $request.Contains('action')) { [string]$request.action } else { 'Unknown' }
     $details=Get-FailureDetails $failure $action
     try { Write-AtomicJson (Join-Path $Root 'runtime\last-error.json') $details } catch {}
-    [Console]::WriteLine((@{ok=$false;error=$failure.Exception.Message;error_details=$details} | ConvertTo-Json -Depth 8 -Compress))
-    [Console]::Out.Flush()
+    Write-BridgeReply @{ok=$false;error=$failure.Exception.Message;error_details=$details} -Depth 8
     exit 1
 }
