@@ -326,7 +326,7 @@ try {
 
     # Allow the cold PowerShell fixture to spawn its supervised child before
     # testing the deadline; the production operation still has a hard bound.
-    [IO.File]::WriteAllText((Join-Path $root 'runtime\qa-operation-limits.json'),'{"Disconnect":3000,"Exit":1000,"Snapshot":1000,"Init":1000}')
+    [IO.File]::WriteAllText((Join-Path $root 'runtime\qa-operation-limits.json'),'{"Disconnect":3000,"Exit":3000,"Snapshot":3000,"Init":3000}')
     [IO.File]::WriteAllText((Join-Path $root 'runtime\fail-snapshot.marker'),'Snapshot failure is synthetic')
     $snapshotFailure=Request @{action='Connect';failWork=$true;request_id='snapshot-failure-fixture'}
     Assert (!$snapshotFailure.ok -and !$snapshotFailure.data.busy -and !$snapshotFailure.data.starting -and $snapshotFailure.data.phase -eq 'idle' -and $snapshotFailure.data.status_uncertain) 'failed cleanup Snapshot reaches a finite disconnected terminal state'

@@ -26,7 +26,16 @@ function Set-OwnedTestRoot([string]$Path,[string]$Fixture) {
         if (!$item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {throw 'Test root must contain ordinary directories'}
         $sections=[Security.AccessControl.AccessControlSections]::Access -bor [Security.AccessControl.AccessControlSections]::Owner
         $current=$item.GetAccessControl($sections)
-        if ($current.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $owner.Value) {throw 'Test fixture has a foreign owner'}
+        $currentOwner=$current.GetOwner([Security.Principal.SecurityIdentifier]).Value
+        if ($currentOwner -ne $owner.Value) {
+            # An elevated Windows runner creates fresh directories with the
+            # Administrators group as owner. Normalize only that exact case,
+            # inside the already validated fresh fixture, never another user.
+            $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
+            $principal=New-Object Security.Principal.WindowsPrincipal($identity)
+            if($currentOwner -ne 'S-1-5-32-544' -or !$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){throw 'Test fixture has a foreign owner'}
+            $current.SetOwner($owner)
+        }
         $current.SetSecurityDescriptorSddlForm($expected.GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access),[Security.AccessControl.AccessControlSections]::Access)
         $item.SetAccessControl($current)
         $actual=$item.GetAccessControl($sections)
