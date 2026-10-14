@@ -1,6 +1,6 @@
 [package]
 name = "mukhomor"
-version = "0.5.0"
+version = "0.7.2"
 edition = "2024"
 license = "MIT"
 description = "Native Windows client for mihomo with local profile import and gaming split routing"
@@ -9,12 +9,15 @@ homepage = "https://github.com/0nionow1/Mukhomor"
 readme = "../README.md"
 
 [dependencies]
+serde = "=1.0.228"
 serde_json = "=1.0.149"
 windows-sys = { version = "=0.61.2", features = [
   "Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_Security",
-  "Win32_Security_Authorization", "Win32_System_Threading",
+  "Win32_Security_Authorization", "Win32_Security_Cryptography", "Win32_System_Threading",
   "Win32_System_Pipes", "Win32_System_IO", "Win32_System_Memory", "Win32_System_JobObjects",
-  "Win32_System_Services", "Win32_System_LibraryLoader", "Win32_System_Registry", "Win32_System_Com",
+  "Win32_System_Services", "Win32_System_LibraryLoader", "Win32_System_Registry", "Win32_System_Com", "Win32_System_Time",
+  "Win32_NetworkManagement_WindowsFilteringPlatform", "Win32_System_Rpc",
+  "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock",
   "Win32_Storage_FileSystem", "Win32_UI_WindowsAndMessaging",
   "Win32_UI_Controls", "Win32_UI_Controls_Dialogs", "Win32_UI_Shell",
   "Win32_UI_HiDpi", "Win32_System_SystemInformation", "Win32_UI_Input_KeyboardAndMouse", "Win32_Storage_Xps"

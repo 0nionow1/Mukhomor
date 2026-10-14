@@ -1,4 +1,4 @@
-﻿param([Parameter(Mandatory=$true)][string]$Root)
+param([Parameter(Mandatory=$true)][string]$Root)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 [Console]::InputEncoding=New-Object Text.UTF8Encoding($false)
@@ -8,7 +8,7 @@ Import-Module (Join-Path $PSScriptRoot 'SplitWindows.psm1') -Force -DisableNameC
 
 function Read-ProfileIndex {
     $path=Join-Path $Root 'private\profiles.json'
-    $index=if (Test-Path -LiteralPath $path) {Read-JsonFile $path} else {@{schema=1;selected='';autoconnect=$false;profiles=@()}}
+    $index=if (Test-Path -LiteralPath $path) {Read-JsonFile $path} else {@{schema=1;selected='';last_connected='';autoconnect=$false;profiles=@()}}
     if ($index.schema -ne 1 -or $index.profiles -isnot [array] -or $index.profiles.Count -gt 512) {throw 'Invalid profile library'}
     $ids=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
     foreach ($profile in $index.profiles) {
@@ -17,6 +17,10 @@ function Read-ProfileIndex {
         if ($profile.ContainsKey('protocol') -and (!$profile.protocol -or $profile.protocol.Length -gt 40 -or $profile.protocol -match '[\x00-\x1f]')) {throw 'Invalid profile protocol label'}
     }
     if ($index.selected -and !$ids.Contains($index.selected)) {throw 'Selected server is missing from the profile library'}
+    # Freeze legacy history once, before an idle Select can change selected.
+    if (!$index.ContainsKey('last_connected')) {$index.last_connected=$index.selected;Save-ProfileIndex $index}
+    if ($index.last_connected -isnot [string] -or ($index.last_connected -and $index.last_connected -cnotmatch '^[a-f0-9]{32}$')) {throw 'Invalid last connected server'}
+    if ($index.last_connected -and !$ids.Contains($index.last_connected)) {$index.last_connected='';Save-ProfileIndex $index}
     return $index
 }
 function Save-ProfileIndex($Index) {Write-AtomicJson (Join-Path $Root 'private\profiles.json') $Index}
@@ -42,16 +46,16 @@ function Get-Snapshot {
     $index=Read-ProfileIndex
     $status=Get-SplitStatus $Root
     $settings=if($null -ne $ValidatedSettings){$ValidatedSettings}else{Get-SplitSettings $Root}
-    return @{profiles=@($index.profiles | ForEach-Object {@{id=$_.id;name=$_.name;protocol=$(if ($_.ContainsKey('protocol')) {$_.protocol} else {'WireGuard / AmneziaWG'})}});selected=$index.selected;autoconnect=$index.autoconnect;running=($status.running -and !$status.starting);starting=$status.starting;dns_recovery_pending=($status.dns_recovery_pending -and !$status.running -and !$status.starting);dns_hosts=$status.dns_hosts;dns_pending=$status.dns_refresh_pending;dns_failed=$status.dns_failed_hosts;settings=$settings}
+    return @{profiles=@($index.profiles | ForEach-Object {@{id=$_.id;name=$_.name;protocol=$(if ($_.ContainsKey('protocol')) {$_.protocol} else {'WireGuard / AmneziaWG'})}});selected=$index.selected;last_connected=$index.last_connected;autoconnect=$index.autoconnect;running=($status.running -and !$status.starting);starting=$status.starting;traffic_guard=$status.traffic_guard;dns_recovery_pending=($status.dns_recovery_pending -and !$status.running -and !$status.starting);dns_hosts=$status.dns_hosts;dns_pending=$status.dns_refresh_pending;dns_failed=$status.dns_failed_hosts;settings=$settings}
 }
 
 function Get-FailureDetails($Failure, [string]$Action) {
     $invocation=$Failure.InvocationInfo
     $scriptName=if ($invocation) { [IO.Path]::GetFileName([string]$invocation.ScriptName) } else { '' }
-    if ($scriptName -notin @('NativeBridge.ps1','SplitVpn.psm1','SplitWindows.psm1','ProfileImport.psm1')) { $scriptName='' }
+    if ($scriptName -notin @('NativeBridge.ps1','SplitVpn.psm1','SplitWindows.psm1','TrafficGuard.psm1','ProfileImport.psm1')) { $scriptName='' }
     $command=if ($invocation -and $invocation.MyCommand) { [string]$invocation.MyCommand.Name } else { '' }
     if ($command -notmatch '^[A-Za-z][A-Za-z0-9-]{0,100}$') { $command='' }
-    if ($Action -notin @('Init','Snapshot','Import','Select','Rename','Remove','Connect','Disconnect','Exit','Autoconnect','ApplySettings','Update','UpdateDns','Diagnose')) { $Action='Unknown' }
+    if ($Action -notin @('Init','Snapshot','Import','Select','Rename','Remove','Connect','Disconnect','Recover','Exit','Autoconnect','ValidateSettings','ApplySettings','Update','UpdateDns','Diagnose')) { $Action='Unknown' }
     $rollback=@()
     if ($Failure.Exception.Data.Contains('MukhomorRollbackFailures')) {
         $rollback=@($Failure.Exception.Data['MukhomorRollbackFailures'] | Where-Object { $_ -in @('dns','core','core-direct','profiles') } | Sort-Object -Unique)
@@ -86,7 +90,7 @@ try {
     Initialize-SplitRoot $Root
     [IO.Directory]::CreateDirectory((Join-Path $Root 'private\profiles')) | Out-Null
     $index=Read-ProfileIndex
-    $recoveryError=''; $importedCount=0
+    $recoveryError=''; $importedCount=0; $appliedIssues=$null
     switch ([string]$request.action) {
         'Init' {
             # A crashed service can leave a DNS snapshot. Recover before retrying.
@@ -174,6 +178,7 @@ try {
         }
         'Remove' {
             $path=Indexed-ProfilePath $index $request.id
+            if ($index.last_connected -eq $request.id) {$index.last_connected=''}
             if ($index.selected -eq $request.id -and (Get-OwnedCore $Root)) {throw 'Disconnect before removing the active server'}
             $index.profiles=@($index.profiles | Where-Object {$_.id -ne $request.id})
             if ($index.selected -eq $request.id) {
@@ -183,20 +188,29 @@ try {
             Save-ProfileIndex $index; [IO.File]::Delete($path)
         }
         'Connect' {
-            if (!$index.selected) {throw 'Import and select a server first'}
+            $target=if ($request.ContainsKey('id')) {[string]$request.id}else{$index.selected}
+            if (!$target) {throw 'Import and select a server first'}
+            $profilePath=Indexed-ProfilePath $index $target
+            if ((Get-OwnedCore $Root) -and $target -ne $index.selected) {throw 'Disconnect before selecting a different server'}
             if (!(Get-OwnedCore $Root)) {
                 # The library is authoritative after a forced cancellation may
                 # have interrupted a previous server switch between commits.
-                Import-SplitProfile $Root (Indexed-ProfilePath $index $index.selected)
+                Import-SplitProfile $Root $profilePath
                 Start-SplitSession $Root $true
+                if ($target -ne $index.selected) {$index.selected=$target;Save-ProfileIndex $index}
             }
         }
-        'Disconnect' {Stop-SplitSession $Root}
-        'Exit' {Stop-SplitSession $Root}
+        'Disconnect' {Stop-SplitSession $Root -ReleaseGuard}
+        'Exit' {Stop-SplitSession $Root -ReleaseGuard}
+        'Recover' {Stop-SplitSession $Root}
         'Autoconnect' {$index.autoconnect=[bool]$request.enabled; Save-ProfileIndex $index}
+        'ValidateSettings' {$validated=Get-SplitSettings $Root $request.settings}
         'ApplySettings' {
-            if ($index.selected) {$s=Set-SplitConfig $Root $request.settings $true -Reload:($null -ne (Get-OwnedCore $Root)) -PassThru}
-            else {$s=Get-SplitSettings $Root $request.settings;Write-AtomicJson (Join-Path $Root 'settings.json') $s}
+            $validated=Get-SplitSettings $Root $request.settings
+            $currentPolicy=(Get-SplitSettings $Root).routing
+            Assert-SplitTrafficGuardRoutingChange $Root $currentPolicy $validated.routing
+            if ($index.selected) {$s=Set-SplitConfig $Root $validated $true -Reload:($null -ne (Get-OwnedCore $Root)) -PassThru -RuleIssues ([ref]$appliedIssues)}
+            else {$s=$validated;Write-AtomicJson (Join-Path $Root 'settings.json') $s}
         }
         'Update' {if (Get-OwnedCore $Root) {Update-SplitRuleSets $Root | Out-Null}; Update-SplitDns $Root -Force | Out-Null}
         'UpdateDns' {Update-SplitDns $Root | Out-Null}
@@ -204,6 +218,12 @@ try {
         default {throw 'Unsupported operation'}
     }
     $snapshot=if($request.action -eq 'ApplySettings'){Get-Snapshot -ValidatedSettings $s}else{Get-Snapshot}
+    if ($request.action -in @('Init','ApplySettings','ValidateSettings')) {
+        if ($request.action -eq 'ApplySettings' -and $null -ne $appliedIssues) {$issues=$appliedIssues}
+        else {$issues=Get-RuleSettingsIssues $(if ($request.action -eq 'ValidateSettings') {$validated}else{$snapshot.settings})}
+        $snapshot.rule_issues_total=$issues.Count
+        $snapshot.rule_issues=Select-RuleSettingsIssues $issues
+    }
     if ($importedCount -gt 0) {$snapshot.imported_count=$importedCount}
     if($recoveryError){$snapshot.last_error=$recoveryError}
     Write-BridgeReply @{ok=$true;data=$snapshot}

@@ -34,7 +34,7 @@ try {
         & git.exe -C $gitRoot check-ignore --quiet -- $relative
         Assert ($LASTEXITCODE -eq 0) ('ignored synthetic private path '+$relative)
     }
-    foreach($relative in @('Mukhomor/native/src/main.rs','Mukhomor/native/src/font.rs','Mukhomor/native/src/i18n.rs','Mukhomor/native/src/texture.rs','Mukhomor/native/Cargo.lock','Mukhomor/native/windows.manifest','Mukhomor/NativeBridge.ps1','Mukhomor/ProfileImport.psm1','Mukhomor/tests/Test-ProfileImport.ps1','Mukhomor/tests/Test-ProtocolTransport.ps1','Mukhomor/tests/Test-LargeRules.ps1','Mukhomor/tests/Measure-Routing.ps1','Mukhomor/tests/routing-benchmark.cjs','Mukhomor/assets/settings.default.json','Mukhomor/assets/fonts/Tiny5-Regular.ttf','Mukhomor/assets/fonts/README.md','Mukhomor/Tiny5-LICENSE.txt','Mukhomor/lists/seed-russia.list','Mukhomor/README.md')){
+    foreach($relative in @('Mukhomor/native/src/main.rs','Mukhomor/native/src/hero.rs','Mukhomor/native/src/font.rs','Mukhomor/native/src/i18n.rs','Mukhomor/native/src/texture.rs','Mukhomor/native/Cargo.lock','Mukhomor/native/windows.manifest','Mukhomor/NativeBridge.ps1','Mukhomor/ProfileImport.psm1','Mukhomor/ReleasePe.psm1','Mukhomor/tests/Test-ReleasePe.ps1','Mukhomor/tests/Test-ProfileImport.ps1','Mukhomor/tests/Test-ProtocolTransport.ps1','Mukhomor/tests/Test-LargeRules.ps1','Mukhomor/tests/Measure-Routing.ps1','Mukhomor/tests/routing-benchmark.cjs','Mukhomor/assets/settings.default.json','Mukhomor/assets/fonts/Tiny5-Regular.ttf','Mukhomor/assets/fonts/README.md','Mukhomor/Tiny5-LICENSE.txt','Mukhomor/lists/seed-russia.list','Mukhomor/README.md')){
         $path=Join-Path $gitRoot $relative;[IO.Directory]::CreateDirectory((Split-Path -Parent $path))|Out-Null;[IO.File]::WriteAllText($path,'synthetic public marker')
         & git.exe -C $gitRoot check-ignore --quiet -- $relative
         Assert ($LASTEXITCODE -eq 1) ('public source remains trackable '+$relative)
@@ -51,8 +51,9 @@ try {
     [IO.Compression.ZipFile]::ExtractToDirectory($Archive,$unpack)
     $release=Join-Path $unpack 'Mukhomor'
     Assert (Test-PackageManifest $release) 'all packaged file hashes and manifest paths verified'
+    Assert (Test-Path -LiteralPath (Join-Path $release 'lists\seed-games.list') -PathType Leaf) 'package includes the first-start gaming provider seed'
     if(Test-Path -LiteralPath (Join-Path $release 'native\Cargo.toml')){
-        foreach($required in @('native\Cargo.lock','native\src\main.rs','Build-Release.ps1','Fetch-Dependencies.ps1','Source\mihomo-v1.19.32-source.zip','docs\credits.md','.github\workflows\release.yml')){Assert (Test-Path -LiteralPath (Join-Path $release $required) -PathType Leaf) ('source package contains '+$required)}
+        foreach($required in @('native\Cargo.lock','native\src\main.rs','native\src\hero.rs','Build-Release.ps1','ReleasePe.psm1','tests\Test-ReleasePe.ps1','Fetch-Dependencies.ps1','Source\mihomo-v1.19.32-source.zip','docs\credits.md','.github\workflows\release.yml')){Assert (Test-Path -LiteralPath (Join-Path $release $required) -PathType Leaf) ('source package contains '+$required)}
         & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $release 'tests\Test-PublicSource.ps1')
         Assert ($LASTEXITCODE -eq 0) 'reviewed source manifest passes the publication scan without Git metadata'
         [IO.File]::AppendAllText((Join-Path $release 'assets\settings.default.json'),'corruption')

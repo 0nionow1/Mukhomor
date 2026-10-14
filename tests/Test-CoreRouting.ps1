@@ -1,5 +1,6 @@
-﻿Set-StrictMode -Version Latest
+Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
+. (Join-Path $PSScriptRoot 'Set-OwnedTestRoot.ps1')
 $root=Split-Path -Parent $PSScriptRoot
 Import-Module (Join-Path $root 'SplitVpn.psm1') -Force -DisableNameChecking
 Import-Module (Join-Path $root 'SplitWindows.psm1') -Force -DisableNameChecking
@@ -21,8 +22,9 @@ function Proxy-Get([int]$ProxyPort,[int]$OriginPort,[string]$HostName) {
 $fixture=Join-Path $PSScriptRoot ('routing-'+[guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($fixture) | Out-Null
 Copy-Item -LiteralPath (Join-Path $root 'assets\settings.default.json') -Destination (Join-Path $fixture 'settings.json')
+Set-OwnedTestRoot $fixture $fixture
 Initialize-SplitRoot $fixture
-$s=Get-SplitSettings $fixture
+$s=Get-SplitSettings $fixture; $s.presets=@()
 $s.dns_update.enabled=$true; $s.direct.domain_rule_sets=@(); $s.direct.rule_set_exclusions=@()
 $s.ports.proxy=Free-Port; $s.ports.controller=Free-Port; $s.ports.dns=Free-Port
 $s.direct.process_names=@('node.exe'); $s.direct.process_paths=@(); $s.direct.domains=@(); $s.direct.domain_suffixes=@('ru'); $s.direct.ip_cidrs=@()

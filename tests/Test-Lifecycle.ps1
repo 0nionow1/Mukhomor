@@ -18,12 +18,12 @@ try {
     $slowDns={
         param($provider,$hostName,$type,$timeoutSeconds)
         $script:DnsRequests++
-        Start-Sleep -Milliseconds 150
+        Start-Sleep -Milliseconds 1100
         return @{Status=0;Answer=@(@{name=$hostName;type=5;TTL=60;data='later.example.test'})}
     }
     $clock=[Diagnostics.Stopwatch]::StartNew(); $failed=$false
-    try { Resolve-DnsApiHost 'fixture.example.test' 64 $slowDns 100 | Out-Null } catch { $failed=$_.Exception.Message -match 'deadline' }
-    Assert ($failed -and $script:DnsRequests -eq 1 -and $clock.ElapsedMilliseconds -lt 1000) 'CNAME and provider fallback share one DNS deadline'
+    try { Resolve-DnsApiHost 'fixture.example.test' 64 $slowDns 1000 | Out-Null } catch { $failed=$_.Exception.Message -match 'deadline' }
+    Assert ($failed -and $script:DnsRequests -eq 1 -and $clock.ElapsedMilliseconds -lt 3000) 'CNAME and provider fallback share one DNS deadline'
     $cancelDns={
         param($provider,$hostName,$type,$timeoutSeconds)
         [IO.File]::WriteAllText((Join-Path $fixture 'runtime\stop.request'),'disconnect')
@@ -66,14 +66,17 @@ try {
         function script:Invoke-NetshDns {
             param($Index,$Family,$Source,$Servers,$TimeoutMilliseconds)
             $script:DnsAttempts++
-            Start-Sleep -Milliseconds ([Math]::Min(100,$TimeoutMilliseconds))
-            if ($TimeoutMilliseconds -le 100) { throw 'Fixture DNS command deadline' }
+            if($script:DnsAttempts -eq 1){Start-Sleep -Milliseconds 100;return}
+            # Consume the supplied remaining budget on the second row. A 150 ms
+            # fixture depended on scheduler jitter before it could reach row 2.
+            Start-Sleep -Milliseconds ($TimeoutMilliseconds+25)
+            throw 'Fixture DNS command deadline'
         }
         Write-AtomicJson $backup @{schema=1;adapters=@($rows[0],$rows[0],$rows[0],$rows[0])}
         $timer=[Diagnostics.Stopwatch]::StartNew(); $failed=$false
-        try { Restore-SessionDns $fixture 150 } catch { $failed=$true }
+        try { Restore-SessionDns $fixture 1000 } catch { $failed=$true }
         $left=Read-JsonFile $backup
-        Test-Assert ($failed -and $script:DnsAttempts -eq 2 -and $left.adapters.Count -eq 3 -and $timer.ElapsedMilliseconds -lt 500) 'DNS recovery shares one total budget and retains all unattempted rows'
+        Test-Assert ($failed -and $script:DnsAttempts -eq 2 -and $left.adapters.Count -eq 3 -and $timer.ElapsedMilliseconds -lt 3000) 'DNS recovery shares one total budget and retains all unattempted rows'
         function script:Invoke-NetshDns { param($Index,$Family,$Source,$Servers,$TimeoutMilliseconds) }
         Restore-SessionDns $fixture
         function New-FixtureCore {

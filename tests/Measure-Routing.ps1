@@ -1,7 +1,8 @@
-﻿# Reproducible local comparison. Never a WAN latency or Wintun benchmark.
+# Reproducible local comparison. Never a WAN latency or Wintun benchmark.
 param([ValidateRange(32,5000)][int]$Entries=5000,[ValidateRange(100,10000)][int]$Iterations=800,[ValidateRange(1,8)][int]$Rounds=3)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
+. (Join-Path $PSScriptRoot 'Set-OwnedTestRoot.ps1')
 $package=Split-Path -Parent $PSScriptRoot
 Import-Module (Join-Path $package 'SplitVpn.psm1') -Force -DisableNameChecking
 $fixture=Join-Path $PSScriptRoot ('benchmark-'+[guid]::NewGuid().ToString('N'))
@@ -14,8 +15,9 @@ function Median($Values) {$sorted=@($Values|Sort-Object);return $sorted[[int][Ma
 try {
     [IO.Directory]::CreateDirectory($fixture)|Out-Null
     Copy-Item -LiteralPath (Join-Path $package 'assets\settings.default.json') -Destination (Join-Path $fixture 'settings.json')
+    Set-OwnedTestRoot $fixture $fixture
     Initialize-SplitRoot $fixture
-    $s=Get-SplitSettings $fixture
+    $s=Get-SplitSettings $fixture; $s.presets=@()
     $s.ports.proxy=Free-Port;$s.ports.controller=Free-Port;$s.ports.dns=Free-Port
     $s.direct.process_names=@();$s.direct.process_paths=@();$s.direct.domain_rule_sets=@();$s.direct.rule_set_exclusions=@()
     $s.direct.domains=@(1..($Entries-1)|ForEach-Object {"exact$_.benchmark.test"})+@('domain-hit.benchmark.test')

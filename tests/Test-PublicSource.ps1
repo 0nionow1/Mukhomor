@@ -15,7 +15,18 @@ if($packaged){
 if(!$files.Count){throw 'No public source files'}
 $issues=New-Object 'Collections.Generic.List[string]'
 $checked=0
+# A privacy allowlist must also retain every required source dependency. These
+# files were previously present locally but excluded from a clean Git checkout.
+$required=@('TrafficGuard.psm1','native/src/cleanup_request.rs','native/src/setup_recovery.rs','native/src/traffic_guard.rs','native/src/traffic_guard_cli.rs','native/src/traffic_guard_tun.rs','tests/Set-OwnedTestRoot.ps1','tests/Test-PrivateAcl.ps1','tests/Test-Uninstall.ps1','tests/Test-ControllerRecovery.ps1','tests/Test-FullRouting.ps1','tests/Test-FullTrafficGuardLifecycle.ps1','tests/Test-NativeGuardRecovery.ps1')
+foreach($relative in $required){
+    if($relative -notin $files){$issues.Add($relative+': required source excluded from publication')}
+}
 foreach($relative in $files){
+    if($packaged -and $relative -in @('Source/mycelium-build.json','Source/mihomo-mycelium-source.zip')){
+        $build=[IO.File]::ReadAllText((Join-Path $package 'Source\mycelium-build.json'))|ConvertFrom-Json
+        if($build.schema -ne 1 -or $build.protocol_version -ne 1 -or $build.base_version -ne '1.19.32' -or $build.source_sha256 -cnotmatch '^[a-f0-9]{64}$' -or (Get-FileHash -LiteralPath (Join-Path $package 'Source\mihomo-mycelium-source.zip')).Hash.ToLowerInvariant() -cne $build.source_sha256){$issues.Add($relative+': Mycelium source provenance mismatch')}
+        continue
+    }
     if($packaged -and $relative -eq 'Source/mihomo-v1.19.32-source.zip'){
         if((Get-FileHash -LiteralPath (Join-Path $package $relative) -Algorithm SHA256).Hash.ToLowerInvariant() -ne '135f16d1e309f8c0ce2303c86fd38a38624a229e7185ceb74d1d3a4f0d4b66f1'){$issues.Add($relative+': source checksum mismatch')}
         continue

@@ -13,6 +13,58 @@ use windows_sys::Win32::{
     System::{Com::*, Services::*, Threading::*},
     UI::{Shell::*, WindowsAndMessaging::*},
 };
+#[path = "cleanup_request.rs"]
+pub(crate) mod cleanup_request;
+#[path = "setup_recovery.rs"]
+mod recovery;
+
+// The controller uses the same handle-based identity and ACL checks as recovery.
+// Keep directory identities pinned until the metadata transaction has committed.
+pub(crate) fn pin_control_path(
+    path: &Path,
+    directory: bool,
+    confidential: bool,
+) -> Result<std::fs::File, String> {
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Security::Authorization::*;
+    use windows_sys::Win32::Storage::FileSystem::*;
+    let mut owner = null_mut();
+    if unsafe { ConvertStringSidToSidW(wide(&user_sid()?).as_ptr(), &mut owner) } == 0 {
+        return Err("Private VPN file identity could not be verified".into());
+    }
+    let result = (|| {
+        let file = recovery::pin(path, directory, Some(owner))?;
+        if confidential {
+            recovery::handle_security(file.as_raw_handle(), SE_FILE_OBJECT, Some(owner), u32::MAX)?;
+        }
+        if directory {
+            // A strong READ_DATA pin first excludes pre-existing reparse writers
+            // while checking the ACL. Child rename needs a less restrictive
+            // directory handle. Open it while the checked strong pin is held:
+            // no delete sharing still prevents parent replacement, and the
+            // verified DACL permits new writers only from trusted principals.
+            let identity = std::fs::OpenOptions::new()
+                .access_mode(FILE_GENERIC_READ)
+                .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+                .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS)
+                .open(path)
+                .map_err(|e| e.to_string())?;
+            return Ok(identity);
+        }
+        Ok(file)
+    })();
+    unsafe {
+        LocalFree(owner);
+    }
+    result.map_err(|_: String| "Private VPN file identity could not be verified".into())
+}
+
+/// Explicit cleanup may restart only the exact protected installed controller.
+/// This does not install, upgrade, elevate, or resume a saved Connect intent.
+pub fn ensure_controller_for_recovery(root: &Path) -> Result<(), String> {
+    recovery::ensure(root)
+}
 
 pub fn folder(id: u32) -> Result<PathBuf, String> {
     let mut buffer = [0u16; 260];
@@ -198,6 +250,9 @@ pub fn ensure_installed(base: &Path, root: &Path) -> Result<bool, String> {
 }
 
 fn start_controller(target: &Path, root: &Path) -> Result<(), String> {
+    check_controller(target, root, true)
+}
+fn check_controller(target: &Path, root: &Path, start: bool) -> Result<(), String> {
     struct ServiceHandle(SC_HANDLE);
     impl Drop for ServiceHandle {
         fn drop(&mut self) {
@@ -213,7 +268,7 @@ fn start_controller(target: &Path, root: &Path) -> Result<(), String> {
         let service = OpenServiceW(
             manager.0,
             wide("Mukhomor").as_ptr(),
-            SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_START,
+            SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | if start { SERVICE_START } else { 0 },
         );
         if service.is_null() {
             return Err("Не удалось открыть Mukhomor. Запусти обновлённый архив для восстановления установки.".into());
@@ -246,6 +301,12 @@ fn start_controller(target: &Path, root: &Path) -> Result<(), String> {
         if actual.to_lowercase() != expected.to_lowercase() {
             return Err("Контроллер не принадлежит этой установке Mukhomor".into());
         }
+        // Logon must preserve SCM's automatic boot reason. A demand start here
+        // would mistake last boot's disconnect for a cancellation this boot.
+        // The hidden UI waits for readiness; explicit manual opening can start.
+        if !start {
+            return Ok(());
+        }
         let deadline = Instant::now() + Duration::from_secs(15);
         loop {
             let mut status: SERVICE_STATUS_PROCESS = std::mem::zeroed();
@@ -275,6 +336,28 @@ fn start_controller(target: &Path, root: &Path) -> Result<(), String> {
             std::thread::sleep(Duration::from_millis(100));
         }
     }
+}
+
+/// Logon is unattended: never install, downgrade, or request elevation.
+pub fn ensure_startup_ready(root: &Path) -> Result<bool, String> {
+    let target = installed(root)?;
+    let current = std::env::current_exe().map_err(|e| e.to_string())?;
+    if current.canonicalize().map_err(|e| e.to_string())?
+        != target.canonicalize().map_err(|e| e.to_string())?
+    {
+        shell(&target, "--startup", false, false)?;
+        return Ok(false);
+    }
+    match controller_state()? {
+        None => {
+            return Err(
+                "Контроллер Mukhomor не установлен. Открой приложение вручную для восстановления."
+                    .into(),
+            );
+        }
+        Some(_) => check_controller(&target, root, false)?,
+    }
+    Ok(true)
 }
 
 fn controller_state() -> Result<Option<u32>, String> {

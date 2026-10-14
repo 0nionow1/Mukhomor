@@ -5,6 +5,37 @@ static CONFIG: OnceLock<(PathBuf, PathBuf)> = OnceLock::new();
 static STOP: OnceLock<isize> = OnceLock::new();
 static STATUS: OnceLock<isize> = OnceLock::new();
 const NAME: &str = "Mukhomor";
+fn cleanup_start(args: &[&str]) -> Result<bool, String> {
+    match args {
+        [NAME] => Ok(false),
+        [NAME, "cleanup-only"] => Ok(true),
+        _ => Err("Invalid controller startup arguments".into()),
+    }
+}
+unsafe fn startup_arguments(argc: u32, argv: *mut *mut u16) -> Result<bool, String> {
+    if !(1..=2).contains(&argc) || argv.is_null() {
+        return Err("Invalid controller startup arguments".into());
+    }
+    let mut arguments = Vec::new();
+    for index in 0..argc as usize {
+        let value = unsafe { *argv.add(index) };
+        if value.is_null() {
+            return Err("Invalid controller startup arguments".into());
+        }
+        let mut count = 0;
+        while count < 64 && unsafe { *value.add(count) } != 0 {
+            count += 1;
+        }
+        if count == 64 {
+            return Err("Invalid controller startup arguments".into());
+        }
+        arguments.push(
+            String::from_utf16(unsafe { std::slice::from_raw_parts(value, count) })
+                .map_err(|_| "Invalid controller startup arguments")?,
+        );
+    }
+    cleanup_start(&arguments.iter().map(String::as_str).collect::<Vec<_>>())
+}
 
 fn is_system_boot(handle: SERVICE_STATUS_HANDLE) -> bool {
     unsafe {
@@ -83,7 +114,7 @@ unsafe extern "system" fn control(
     }
     NO_ERROR
 }
-unsafe extern "system" fn entry(_argc: u32, _argv: *mut *mut u16) {
+unsafe extern "system" fn entry(argc: u32, argv: *mut *mut u16) {
     let name = platform::wide(NAME);
     let handle = unsafe { RegisterServiceCtrlHandlerExW(name.as_ptr(), Some(control), null_mut()) };
     if handle.is_null() {
@@ -93,16 +124,26 @@ unsafe extern "system" fn entry(_argc: u32, _argv: *mut *mut u16) {
     let stop = platform::new_event();
     let _ = STOP.set(stop);
     status(SERVICE_RUNNING, false);
-    let result = if let Some((base, root)) = CONFIG.get() {
-        backend::run_with_startup(base.clone(), root.clone(), stop, is_system_boot(handle))
-    } else {
-        Err("Missing service configuration".into())
-    };
+    let arguments = unsafe { startup_arguments(argc, argv) };
+    let cleanup_only = arguments.as_ref().is_ok_and(|cleanup| *cleanup);
+    let result = arguments.and_then(|cleanup| {
+        if let Some((base, root)) = CONFIG.get() {
+            if cleanup {
+                backend::run_cleanup_only(base.clone(), root.clone(), stop)
+            } else {
+                backend::run_with_startup(base.clone(), root.clone(), stop, is_system_boot(handle))
+            }
+        } else {
+            Err("Missing service configuration".into())
+        }
+    });
     if let (Err(error), Some((_, root))) = (&result, CONFIG.get()) {
         let _ = std::fs::create_dir_all(root.join("runtime/logs"));
         let _ = std::fs::write(root.join("runtime/logs/native-service-error.log"), error);
     }
-    status(SERVICE_STOPPED, result.is_err());
+    // Retain the diagnostic, but cleanup startup errors must not trigger an
+    // ordinary SCM recovery that could re-enable saved connection desire.
+    status(SERVICE_STOPPED, result.is_err() && !cleanup_only);
     unsafe {
         CloseHandle(stop as HANDLE);
     }
@@ -124,4 +165,28 @@ pub fn dispatch(base: PathBuf, root: PathBuf) -> Result<(), String> {
         return Err("Windows could not start the Mukhomor service".into());
     }
     Ok(())
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn explicit_cleanup_start_is_exact_and_normal_start_stays_normal() {
+        assert!(!cleanup_start(&[NAME]).unwrap());
+        assert!(cleanup_start(&[NAME, "cleanup-only"]).unwrap());
+        for args in [
+            vec![],
+            vec!["Other"],
+            vec![NAME, "Cleanup-only"],
+            vec![NAME, "cleanup-only", "extra"],
+            vec!["Other", "cleanup-only"],
+        ] {
+            assert!(cleanup_start(&args).is_err());
+        }
+        assert!(unsafe { startup_arguments(0, null_mut()) }.is_err());
+        assert!(unsafe { startup_arguments(2, null_mut()) }.is_err());
+        let mut name = platform::wide(NAME);
+        let mut flag = platform::wide("cleanup-only");
+        let mut pointers = [name.as_mut_ptr(), flag.as_mut_ptr()];
+        assert!(unsafe { startup_arguments(2, pointers.as_mut_ptr()) }.unwrap());
+    }
 }

@@ -1,6 +1,7 @@
-﻿param([switch]$SkipCore,[string]$CorePath,[string]$Base)
+param([switch]$SkipCore,[string]$CorePath,[string]$Base)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
+. (Join-Path $PSScriptRoot 'Set-OwnedTestRoot.ps1')
 $package=if($Base){[IO.Path]::GetFullPath($Base)}else{Split-Path -Parent $PSScriptRoot}
 Import-Module (Join-Path $package 'SplitVpn.psm1') -Force -DisableNameChecking
 $passed=0
@@ -16,8 +17,13 @@ try{
     $env:MUKHOMOR_ASSETS=$package
     if(!$CorePath){$CorePath=Get-CorePath $package};$env:MUKHOMOR_CORE_PATH=$CorePath
     Copy-Item -LiteralPath (Join-Path $package 'assets\settings.default.json') -Destination (Join-Path $fixture 'settings.json')
+    Set-OwnedTestRoot $fixture $fixture
     Initialize-SplitRoot $fixture
-    $settings=Get-SplitSettings $fixture;$settings.direct.domain_rule_sets=@();$settings.direct.rule_set_exclusions=@();$settings.dns_update.enabled=$false
+    $settings=Get-EffectiveSplitSettings (Get-SplitSettings $fixture);$settings.presets=@();$settings.direct.domain_rule_sets=@();$settings.direct.rule_set_exclusions=@();$settings.dns_update.enabled=$false
+    # Import compatibility uses a small explicit routing fixture. Expanded
+    # bundled lists can legitimately switch domains to an inline RULE-SET;
+    # their full routing behavior is covered by Test-BundledRouting.ps1.
+    $settings.direct.process_names=@('qbittorrent.exe');$settings.direct.domain_suffixes=@('ru')
     Write-AtomicJson (Join-Path $fixture 'settings.json') $settings
     $uuid='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
     $ssAuth=B64 'aes-128-gcm:fixture-password'
@@ -67,6 +73,11 @@ proxies:
     Assert ((Parse $json).Count -eq 2) 'JSON proxies collections import multiple nodes'
     Assert ((Parse (@($uris[0].proxy,$uris[2].proxy)|ConvertTo-Json -Depth 12)).Count -eq 2) 'JSON arrays import multiple nodes'
     Assert ((Parse (@{schema=1;proxy=$uris[0].proxy}|ConvertTo-Json -Depth 12)).Count -eq 1) 'normalized profile envelopes remain readable'
+    $mycelium=@{type='mycelium';server='192.0.2.1';port=8444;seed=('12'*32);transport='h2';udp=$true}
+    $myceliumNode=(Parse ($mycelium|ConvertTo-Json))[0]
+    Assert ($myceliumNode.proxy.transport -eq 'h2' -and !$myceliumNode.proxy.ContainsKey('fingerprint')) 'Mycelium preserves explicit HTTP/2 and public-PKI verification'
+    $mycelium.transport='websocket';Assert ((Parse ($mycelium|ConvertTo-Json))[0].proxy.transport -eq 'websocket') 'Mycelium permits an explicit authenticated compatibility transport'
+    $mycelium.transport='PRIVATE-CANARY';Reject {Parse ($mycelium|ConvertTo-Json)} 'Mycelium rejects unknown transport without exposing the value'
     $wg=@'
 [Interface]
 PrivateKey = QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE=
@@ -151,8 +162,8 @@ AllowedIPs = 0.0.0.0/0
     $additional=Parse ($more|ConvertTo-Json -Depth 12)
     Assert ($additional.Count -eq 8 -and @($additional|Where-Object {$_.protocol -eq 'ssh'})[0].proxy['host-key'][0] -eq $hostKey) 'advanced outgoing JSON nodes preserve protocol credentials and verified SSH identity'
     $all=@($uris)+@($vmessNode,$ssrNode,$wgNode,$ovpnNode)+@($additional)
-    Assert (@($all|ForEach-Object {$_.proxy.type}|Sort-Object -Unique).Count -eq 21) 'synthetic fixtures cover every advertised standalone protocol type'
-    Assert ((Get-SplitProfileCapabilities|Measure-Object).Count -eq 21) 'capability metadata advertises the implemented standalone types'
+    Assert (@($all|ForEach-Object {$_.proxy.type}|Sort-Object -Unique).Count -eq 21) 'synthetic fixtures cover every stock Mihomo standalone protocol type'
+    Assert ((Get-SplitProfileCapabilities|Measure-Object).Count -eq 22 -and @(Get-SplitProfileCapabilities|Where-Object {$_.type -eq 'mycelium'}).Count -eq 1) 'capability metadata includes the native Mycelium adapter tested separately'
     if(!$SkipCore){
         Test-SplitProfileProxies $fixture (@($all|ForEach-Object {$_.proxy})+@($chain,$tlsChain))
         Assert $true 'all twenty-one protocols pass the actual pinned Mihomo -t in one isolated bulk configuration'

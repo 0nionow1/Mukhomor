@@ -4,6 +4,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'ProfileImport.psm1') -Force -DisableNameChecking
 $script:DomainIdnMapping=New-Object Globalization.IdnMapping
+. (Join-Path $PSScriptRoot 'RulePresets.ps1')
 
 function Read-JsonFile([string]$Path) {
     if (!(Test-Path -LiteralPath $Path)) { throw "File not found: $Path" }
@@ -52,20 +53,215 @@ function Write-AtomicJson([string]$Path, $Value) {
     Write-AtomicText $Path ($Value | ConvertTo-Json -Depth 40)
 }
 
+function Test-SplitPrivateAcl($Acl, [Security.Principal.SecurityIdentifier]$Owner) {
+    if (!$Acl.AreAccessRulesProtected -or $Acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $Owner.Value) {return $false}
+    $allowed=@($Owner.Value,'S-1-5-18','S-1-5-32-544'|Sort-Object -Unique)
+    $seen=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    $rules=@($Acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]))
+    if ($rules.Count -ne $allowed.Count) {return $false}
+    foreach ($rule in $rules) {
+        if ($rule.IdentityReference.Value -notin $allowed -or !$seen.Add($rule.IdentityReference.Value) -or $rule.AccessControlType -ne 'Allow' -or $rule.FileSystemRights -ne [Security.AccessControl.FileSystemRights]::FullControl -or $rule.InheritanceFlags -ne ([Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit) -or $rule.PropagationFlags -ne 'None' -or $rule.IsInherited) {return $false}
+    }
+    return $true
+}
+function Test-SplitPrivateFileAcl($Acl, [Security.Principal.SecurityIdentifier]$Owner) {
+    if (!$Acl.AreAccessRulesProtected -or $Acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $Owner.Value) {return $false}
+    $allowed=@($Owner.Value,'S-1-5-18','S-1-5-32-544'|Sort-Object -Unique)
+    $seen=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    $rules=@($Acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]))
+    if ($rules.Count -ne $allowed.Count) {return $false}
+    foreach ($rule in $rules) {
+        if ($rule.IdentityReference.Value -notin $allowed -or !$seen.Add($rule.IdentityReference.Value) -or $rule.AccessControlType -ne 'Allow' -or $rule.FileSystemRights -ne [Security.AccessControl.FileSystemRights]::FullControl -or $rule.InheritanceFlags -ne 'None' -or $rule.PropagationFlags -ne 'None' -or $rule.IsInherited) {return $false}
+    }
+    return $true
+}
+function Assert-SplitOwnedStateRoot([string]$Root, [Security.Principal.SecurityIdentifier]$Owner) {
+    $item=Get-Item -LiteralPath $Root -Force
+    if (!$item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {throw 'VPN state directory must be an owned ordinary directory'}
+    $acl=Get-Acl -LiteralPath $Root
+    $allowed=@($Owner.Value,'S-1-5-18','S-1-5-32-544'|Sort-Object -Unique)
+    if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -notin $allowed) {throw 'VPN state directory has a foreign owner'}
+    $write=([Security.AccessControl.FileSystemRights]::Write -bor [Security.AccessControl.FileSystemRights]::Delete -bor [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor [Security.AccessControl.FileSystemRights]::ChangePermissions -bor [Security.AccessControl.FileSystemRights]::TakeOwnership)
+    foreach ($rule in $acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])) {
+        # An inherit-only ACE does not grant access to this directory. Public
+        # READ is fine; replacing the private child must remain privileged.
+        if ($rule.AccessControlType -eq 'Allow' -and !($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) -and $rule.IdentityReference.Value -notin $allowed -and ($rule.FileSystemRights -band $write)) {throw 'VPN state directory allows untrusted writes'}
+    }
+}
+function New-SplitPrivateFileAcl([Security.Principal.SecurityIdentifier]$Owner) {
+    $acl=New-Object Security.AccessControl.FileSecurity
+    $acl.SetOwner($Owner);$acl.SetAccessRuleProtection($true,$false)
+    foreach ($value in @($Owner.Value,'S-1-5-18','S-1-5-32-544'|Sort-Object -Unique)) {
+        $principal=New-Object Security.Principal.SecurityIdentifier($value)
+        $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($principal,'FullControl','None','None','Allow')))
+    }
+    return $acl
+}
+function Initialize-SplitPrivateIdentity {
+    if (!('MukhomorPrivateFileIdentity' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+public static class MukhomorPrivateFileIdentity {
+ [StructLayout(LayoutKind.Sequential)] public struct Info {
+  public uint Attributes, CreationLow, CreationHigh, AccessLow, AccessHigh,
+   WriteLow, WriteHigh, Volume, SizeHigh, SizeLow, Links, IndexHigh, IndexLow;
+ }
+ [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+ public static extern SafeFileHandle CreateFileW(string path, uint access,
+  uint sharing, IntPtr security, uint disposition, uint flags, IntPtr template);
+ [DllImport("kernel32.dll", SetLastError=true)]
+ [return: MarshalAs(UnmanagedType.Bool)]
+ public static extern bool GetFileInformationByHandle(SafeFileHandle file, out Info info);
+}
+'@
+    }
+}
+function Open-SplitPrivateFile([string]$Path) {
+    Initialize-SplitPrivateIdentity
+    # Open the link itself without reading bytes. READ_DATA is necessary for
+    # Windows sharing arbitration: READ_ATTRIBUTES alone does not exclude an
+    # existing writer. Deny write/delete while checking and updating this path.
+    $handle=[MukhomorPrivateFileIdentity]::CreateFileW($Path,0x81,1,[IntPtr]::Zero,3,0x200000,[IntPtr]::Zero)
+    if ($handle.IsInvalid) {$handle.Dispose();throw 'Private VPN file identity could not be verified'}
+    $info=New-Object MukhomorPrivateFileIdentity+Info
+    if (![MukhomorPrivateFileIdentity]::GetFileInformationByHandle($handle,[ref]$info) -or ($info.Attributes -band 0x410) -or $info.Links -ne 1) {$handle.Dispose();throw 'Private VPN files must be ordinary files with a single link'}
+    return $handle
+}
+function Open-SplitPrivateDirectory([string]$Path) {
+    Initialize-SplitPrivateIdentity
+    $handle=[MukhomorPrivateFileIdentity]::CreateFileW($Path,0x81,1,[IntPtr]::Zero,3,0x2200000,[IntPtr]::Zero)
+    if ($handle.IsInvalid) {$handle.Dispose();throw 'Private VPN directory identity could not be verified'}
+    $info=New-Object MukhomorPrivateFileIdentity+Info
+    if (![MukhomorPrivateFileIdentity]::GetFileInformationByHandle($handle,[ref]$info) -or !($info.Attributes -band 0x10) -or ($info.Attributes -band 0x400)) {$handle.Dispose();throw 'Private VPN state must contain ordinary directories'}
+    return $handle
+}
+function Set-SplitPrivatePathAcl([string]$Path, $Expected, [bool]$Directory) {
+    $item=Get-Item -LiteralPath $Path -Force
+    if ($item.PSIsContainer -ne $Directory -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {throw 'Private VPN ACL target must be an ordinary owned item'}
+    $identity=$null
+    try {
+        if ($Directory) {$identity=Open-SplitPrivateDirectory $Path} else {$identity=Open-SplitPrivateFile $Path}
+        $sections=[Security.AccessControl.AccessControlSections]::Access -bor [Security.AccessControl.AccessControlSections]::Owner
+        $current=$item.GetAccessControl($sections)
+        $changed=[Security.AccessControl.AccessControlSections]::Access
+        if ($current.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $Expected.GetOwner([Security.Principal.SecurityIdentifier]).Value) {$changed=$changed -bor [Security.AccessControl.AccessControlSections]::Owner}
+        # Persist the DACL and, only when necessary, the owner. Set-Acl can
+        # request SACL privileges on an already protected object.
+        $current.SetSecurityDescriptorSddlForm($Expected.GetSecurityDescriptorSddlForm($changed),$changed)
+        $item.SetAccessControl($current)
+    } finally {if ($identity) {$identity.Dispose()}}
+}
+function Test-SplitPrivateMigration([string]$Private, [Security.Principal.SecurityIdentifier]$Owner) {
+    $marker=Join-Path $Private '.acl-migration-v2'
+    if (!(Test-Path -LiteralPath $marker)) {return $false}
+    $item=Get-Item -LiteralPath $marker -Force
+    if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $item.Length -gt 64) {return $false}
+    $identity=$null;$stream=$null
+    try {
+        $identity=Open-SplitPrivateFile $marker
+        if (!(Test-SplitPrivateFileAcl (Get-Acl -LiteralPath $marker) $Owner)) {return $false}
+        $stream=[IO.File]::Open($marker,'Open','Read','Read')
+        $bytes=New-Object byte[] 65
+        $count=$stream.Read($bytes,0,$bytes.Length)
+        if ($count -eq $bytes.Length -or $stream.ReadByte() -ne -1) {return $false}
+        return [Text.Encoding]::UTF8.GetString($bytes,0,$count) -ceq "Mukhomor private ACL migration v2`n"
+    } finally {if ($stream) {$stream.Dispose()};if ($identity) {$identity.Dispose()}}
+}
+function Repair-SplitPrivateTree([string]$Private, [Security.Principal.SecurityIdentifier]$Owner, $DirectoryAcl) {
+    $privatePath=[IO.Path]::GetFullPath($Private).TrimEnd('\')
+    $prefix=$privatePath+'\'
+    $filesAcl=New-SplitPrivateFileAcl $Owner
+    $marker=Join-Path $privatePath '.acl-migration-v2'
+    if (Test-Path -LiteralPath $marker) {
+        $oldMarker=Get-Item -LiteralPath $marker -Force
+        if ($oldMarker.PSIsContainer -or ($oldMarker.Attributes -band [IO.FileAttributes]::ReparsePoint)) {throw 'Private VPN migration marker must be an ordinary file'}
+        $identity=Open-SplitPrivateFile $marker
+        $identity.Dispose()
+        # A failed repair must not leave a previously successful stamp behind.
+        [IO.File]::Delete($marker)
+    }
+    $queue=New-Object 'Collections.Generic.Queue[string]'
+    $directoryPins=New-Object 'Collections.Generic.List[Microsoft.Win32.SafeHandles.SafeFileHandle]'
+    $files=New-Object 'Collections.Generic.List[string]'
+    $queue.Enqueue($privatePath)
+    $count=0
+    try {
+    while ($queue.Count) {
+        $directory=$queue.Dequeue()
+        $pin=Open-SplitPrivateDirectory $directory
+        $directoryPins.Add($pin)
+        $item=Get-Item -LiteralPath $directory -Force
+        if (!$item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {throw 'Private VPN state must not contain reparse points'}
+        # Pin against directory replacement and narrow its ACL BEFORE looking
+        # at children. Existing conflicting writable handles fail closed.
+        if (!(Test-SplitPrivateAcl (Get-Acl -LiteralPath $directory) $Owner)) {Set-SplitPrivatePathAcl $directory $DirectoryAcl $true}
+        if (!(Test-SplitPrivateAcl (Get-Acl -LiteralPath $directory) $Owner)) {throw 'Private VPN directory permissions could not be verified'}
+        Get-ChildItem -LiteralPath $directory -Force | ForEach-Object {
+            $entry=$_
+            $count++
+            if ($count -gt 8192) {throw 'Private VPN state exceeds migration entry limit'}
+            $path=[IO.Path]::GetFullPath($entry.FullName)
+            if (!$path.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)) {throw 'Private VPN state escaped its owned directory'}
+            # Never recurse, read content or query/change a link's target ACL.
+            if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) {throw 'Private VPN state must not contain reparse points'}
+            if ($entry.PSIsContainer) {$queue.Enqueue($path)}
+            else {
+                $identity=Open-SplitPrivateFile $path
+                $identity.Dispose()
+                $files.Add($path)
+            }
+        }
+    }
+    # All directories stay pinned and protected. Validate the entire tree
+    # before repairing any file, then re-pin each file while changing its ACL.
+    foreach ($path in $files) {
+        $identity=Open-SplitPrivateFile $path
+        try {
+            if (!(Test-SplitPrivateFileAcl (Get-Acl -LiteralPath $path) $Owner)) {Set-SplitPrivatePathAcl $path $filesAcl $false}
+            if (!(Test-SplitPrivateFileAcl (Get-Acl -LiteralPath $path) $Owner)) {throw 'Private VPN file permissions could not be verified'}
+        } finally {$identity.Dispose()}
+    }
+    } finally {foreach ($pin in $directoryPins) {$pin.Dispose()}}
+    # Every directory/file is now protected. Release pins before atomic stamp
+    # publication: Windows rename requires write sharing on parent directories.
+    Write-AtomicText $marker "Mukhomor private ACL migration v2`n"
+    Set-SplitPrivatePathAcl $marker $filesAcl $false
+    if (!(Test-SplitPrivateMigration $privatePath $Owner)) {throw 'Private VPN migration could not be confirmed'}
+    # This is a one-time upgrade gate. Administrators and the service identity
+    # are trusted; the marker does not detect their later deliberate ACL drift.
+}
 function Initialize-SplitRoot([string]$Root) {
+    $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+    $rootPin=Open-SplitPrivateDirectory $Root
+    $privatePin=$null
+    try {
+    Assert-SplitOwnedStateRoot $Root $sid
+    if ((Test-Path -LiteralPath $Root) -and ((Get-Item -LiteralPath $Root -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {throw 'VPN state directory must not be a reparse point'}
     foreach ($dir in @('private', 'runtime', 'runtime\rules', 'runtime\rules\services', 'runtime\logs')) {
-        [IO.Directory]::CreateDirectory((Join-Path $Root $dir)) | Out-Null
+        $path=Join-Path $Root $dir
+        if ((Test-Path -LiteralPath $path) -and ((Get-Item -LiteralPath $path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {throw 'VPN state directory must not be a reparse point'}
+        [IO.Directory]::CreateDirectory($path) | Out-Null
     }
     # Private files contain the VPN keys and API token. Do not print them.
     $private = Join-Path $Root 'private'
+    $privatePin=Open-SplitPrivateDirectory $private
     $acl = New-Object Security.AccessControl.DirectorySecurity
     $acl.SetAccessRuleProtection($true, $false)
-    $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+    $acl.SetOwner($sid)
     foreach ($principal in @($sid, (New-Object Security.Principal.SecurityIdentifier('S-1-5-18')), (New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')))) {
         $rule = New-Object Security.AccessControl.FileSystemAccessRule($principal, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
         $acl.AddAccessRule($rule)
     }
-    if (!(Get-Acl -LiteralPath $private).AreAccessRulesProtected) { Set-Acl -LiteralPath $private -AclObject $acl }
+    $parentValid=Test-SplitPrivateAcl (Get-Acl -LiteralPath $private) $sid
+    if (!$parentValid) {Set-SplitPrivatePathAcl $private $acl $true}
+    if (!(Test-SplitPrivateAcl (Get-Acl -LiteralPath $private) $sid)) {throw 'Private VPN state permissions could not be verified'}
+    # No conflicting writer was present, and neither parent grants new
+    # untrusted writes. The migration acquires its own checked directory pins.
+    $privatePin.Dispose();$privatePin=$null
+    $rootPin.Dispose();$rootPin=$null
+    if (!$parentValid -or !(Test-SplitPrivateMigration $private $sid)) {Repair-SplitPrivateTree $private $sid $acl}
     $tokenPath = Join-Path $private 'api-token.txt'
     if (!(Test-Path -LiteralPath $tokenPath)) {
         $bytes = New-Object byte[] 32
@@ -84,6 +280,7 @@ function Initialize-SplitRoot([string]$Root) {
             [IO.File]::Copy($seed, $cache, $false)
         }
     }
+    } finally {if ($privatePin) {$privatePin.Dispose()};if ($rootPin) {$rootPin.Dispose()}}
 }
 
 function Invoke-SplitLock([string]$Root, [scriptblock]$Action) {
@@ -137,6 +334,7 @@ function Get-CidrSortKey([string]$Cidr) {
 
 function Get-DomainRuleSetCatalog {
     return @{
+        games=@{url='https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-games.list'}
         russia=@{url='https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ru.list'}
         ozon=@{url='https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/ozon.list'}
         steam=@{url='https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/steam.list'}
@@ -160,33 +358,18 @@ function Test-PublicIp([string]$Value) {
 
 function Get-SplitSettings([string]$Root, $InputSettings = $null) {
     $s = if ($null -eq $InputSettings) { Read-JsonFile (Join-Path $Root 'settings.json') } else { Convert-ToMap $InputSettings }
-    if ($s.schema -ne 1) { throw 'Unsupported settings schema' }
+    if ($s.direct -isnot [hashtable]) {throw 'Invalid direct rules'}
+    foreach ($key in @('domain_rule_sets','rule_set_exclusions')) {if (!$s.direct.ContainsKey($key)) {$s.direct[$key]=@()}}
+    $s=Convert-RuleSettings $s
+    # Existing installs retain their chosen split policy. Full routing is an
+    # explicit independent mode; exception lists remain saved for switching back.
+    if (!$s.ContainsKey('routing')) { $s.routing=@{mode='split';allow_lan=$true} }
+    if ($s.routing -isnot [hashtable] -or $s.routing.mode -isnot [string] -or $s.routing.mode -cnotin @('split','full') -or $s.routing.allow_lan -isnot [bool]) { throw 'Invalid routing policy' }
+    foreach ($key in $s.routing.Keys) { if ($key -cnotin @('mode','allow_lan')) { throw 'Unknown routing policy field' } }
     # Backwards-compatible: old configurations have no remote domain lists.
     if (!$s.direct.ContainsKey('domain_rule_sets')) { $s.direct.domain_rule_sets=@() }
     if (!$s.direct.ContainsKey('rule_set_exclusions')) { $s.direct.rule_set_exclusions=@() }
-    if ($s.direct.rule_set_exclusions -isnot [array] -or $s.direct.rule_set_exclusions.Count -gt 100) { throw 'direct.rule_set_exclusions must be an array of at most 100 domains' }
-    $s.direct.rule_set_exclusions=@($s.direct.rule_set_exclusions | ForEach-Object {Normalize-Domain $_ -Suffix} | Sort-Object -Unique)
-    if ($s.direct.domain_rule_sets -isnot [array]) { throw 'direct.domain_rule_sets must be an array' }
-    $catalog=Get-DomainRuleSetCatalog
-    $s.direct.domain_rule_sets=@($s.direct.domain_rule_sets | ForEach-Object {
-        $name=([string]$_).Trim().ToLowerInvariant()
-        if (!$catalog.ContainsKey($name)) { throw "Unknown domain rule set: $name" }; $name
-    } | Sort-Object -Unique)
-    foreach ($key in @('process_names','process_paths','domains','domain_suffixes','ip_cidrs')) {
-        if (!$s.direct.ContainsKey($key) -or $s.direct[$key] -isnot [array]) { throw "direct.$key must be an array" }
-        if ($s.direct[$key].Count -gt 5000) { throw 'Exception list exceeds 5000 entries' }
-    }
-    $s.direct.process_names = @($s.direct.process_names | ForEach-Object {
-        if ($_ -notmatch '^[^\\/:,*?\r\n]+\.exe$') { throw "Invalid executable name: $_" }; $_.Trim()
-    } | Sort-Object -Unique)
-    $s.direct.process_paths = @($s.direct.process_paths | ForEach-Object {
-        if ($_ -match '[,\r\n*?]' -or $_ -notmatch '^[A-Za-z]:\\.+\.exe$') { throw "Expected an absolute EXE path: $_" }; $_.Trim()
-    } | Sort-Object -Unique)
-    $s.direct.domains = @($s.direct.domains | ForEach-Object { Normalize-Domain $_ } | Sort-Object -Unique)
-    $s.direct.domain_suffixes = @($s.direct.domain_suffixes | ForEach-Object { Normalize-Domain $_ -Suffix } | Sort-Object -Unique)
-    $s.direct.ip_cidrs = @($s.direct.ip_cidrs | ForEach-Object { Normalize-Cidr $_ } | Sort-Object -Unique | Sort-Object { Get-CidrSortKey $_ })
-    $s.dns_update.seed_hosts = @($s.dns_update.seed_hosts | ForEach-Object { Normalize-Domain $_ } | Sort-Object -Unique)
-    foreach ($seed in $s.dns_update.seed_hosts) { if (!(Test-DirectDomain $seed $s)) { throw "DNS seed must match a domain exception: $seed" } }
+    if ($s.dns_update.seed_hosts -isnot [array] -or $s.dns_update.seed_hosts.Count -gt 1000 -or @($s.dns_update.seed_hosts | Where-Object {$_ -isnot [string] -or $_.Length -gt 1024}).Count) {throw 'Invalid DNS seed list'}
     foreach ($pair in @(@('min_refresh_seconds',15,3600), @('max_refresh_seconds',30,86400), @('max_stale_seconds',60,604800), @('max_hosts',1,1000), @('max_addresses_per_host',1,256))) {
         $key=$pair[0]; if ($s.dns_update[$key] -isnot [int] -or $s.dns_update[$key] -lt $pair[1] -or $s.dns_update[$key] -gt $pair[2]) { throw "Invalid dns_update.$key" }
     }
@@ -194,6 +377,9 @@ function Get-SplitSettings([string]$Root, $InputSettings = $null) {
     foreach ($key in @('enabled','observe_subdomains')) { if ($s.dns_update[$key] -isnot [bool]) { throw "dns_update.$key must be boolean" } }
     foreach ($key in @('proxy','controller','dns')) { if ($s.ports[$key] -isnot [int] -or $s.ports[$key] -lt 1024 -or $s.ports[$key] -gt 65535) { throw "Invalid port: $key" } }
     if (@($s.ports.Values | Sort-Object -Unique).Count -ne 3) { throw 'Ports must be distinct' }
+    # Reserve half of the 4 MiB IPC frame for diagnostics and the server library.
+    # Measure serialized UTF-8 bytes, including JSON escaping, rather than characters.
+    if ([Text.Encoding]::UTF8.GetByteCount(($s | ConvertTo-Json -Depth 40 -Compress)) -gt 2097152) {throw 'Settings exceed 2 MiB; reduce rule list size. Your draft has been kept.'}
     return $s
 }
 
@@ -257,9 +443,17 @@ function Convert-SplitProgramPath([string]$Path) {
 }
 
 function Get-CorePath([string]$Root) {
-    $exe=if ($env:MUKHOMOR_CORE_PATH) { $env:MUKHOMOR_CORE_PATH } else { Join-Path $Root 'bin\mihomo-windows-amd64-compatible.exe' }
+    $manifestPath=Join-Path $Root 'bin\mycelium-build.json'
+    $exe=if ($env:MUKHOMOR_CORE_PATH) { $env:MUKHOMOR_CORE_PATH } elseif(Test-Path -LiteralPath $manifestPath) { Join-Path $Root 'bin\mihomo-mycelium.exe' } else { Join-Path $Root 'bin\mihomo-windows-amd64-compatible.exe' }
     $exe=Convert-SplitProgramPath $exe
     if (!(Test-Path -LiteralPath $exe)) { throw 'Mihomo executable is missing' }
+    if([IO.Path]::GetFileName($exe) -eq 'mihomo-mycelium.exe'){
+        $manifestPath=Join-Path ([IO.Path]::GetDirectoryName($exe)) 'mycelium-build.json'
+        if(!(Test-Path -LiteralPath $manifestPath -PathType Leaf)){throw 'Mycelium build manifest is missing'}
+        if((Get-Item -LiteralPath $manifestPath).Length -gt 16384){throw 'Invalid Mycelium build manifest'}
+        $build=Read-JsonFile $manifestPath
+        if(!$build.ContainsKey('schema') -or $build.schema -ne 1 -or !$build.ContainsKey('protocol_version') -or $build.protocol_version -ne 1 -or !$build.ContainsKey('core_sha256') -or $build.core_sha256 -cnotmatch '^[a-f0-9]{64}$' -or (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant() -cne $build.core_sha256){throw 'Mycelium core integrity verification failed'}
+    }
     return $exe
 }
 
@@ -277,8 +471,12 @@ function New-CoreConfig([string]$Root, $Settings, [bool]$TunEnabled=$true, $Tran
 }
 
 # Module-private builder: both public entry points validate once before using it.
-function New-ValidatedCoreConfig([string]$Root, $s, [bool]$TunEnabled, $Transport) {
+function New-ValidatedCoreConfig([string]$Root, $s, [bool]$TunEnabled, $Transport, $RuleIssues=$null) {
+    $projection=Get-RuleSettingsProjection $s
+    $s=$projection.settings
+    if ($null -ne $RuleIssues) {$RuleIssues.Value=$projection.issues}
     $proxy=Get-SelectedSplitProxy $Root
+    $full=($s.routing.mode -ceq 'full')
     # The outer AWG socket must never be routed back into its own TUN.
     # Only the VPN endpoint is excluded here; service IPs remain domain driven.
     if (!$Transport) {
@@ -299,13 +497,14 @@ function New-ValidatedCoreConfig([string]$Root, $s, [bool]$TunEnabled, $Transpor
     }
     $endpointPrefixes=@(Get-EndpointPrefixes $endpointAddresses)
     $rules=New-Object 'Collections.Generic.List[string]'
+    $providers=@{}
+    if (!$full) {
     foreach ($cidr in $endpointPrefixes) {
         $kind=if ($cidr.Contains(':')) { 'IP-CIDR6' } else { 'IP-CIDR' }
         $rules.Add("$kind,$cidr,DIRECT,no-resolve")
     }
     foreach ($name in $s.direct.process_names) { $rules.Add("PROCESS-NAME,$name,DIRECT") }
     foreach ($path in $s.direct.process_paths) { $rules.Add("PROCESS-PATH,$path,DIRECT") }
-    $providers=@{}
     # Compile larger custom lists into the core's immutable domain set. Exact
     # entries stay exact; +. includes both a suffix and its subdomains. Keep the
     # group at its original priority, ahead of rule-set exclusions and IP rules.
@@ -321,9 +520,7 @@ function New-ValidatedCoreConfig([string]$Root, $s, [bool]$TunEnabled, $Transpor
     }
     if ($s.dns_update.enabled) { $providers['dns-ips']=@{type='file';behavior='ipcidr';format='yaml';path='./runtime/rules/dns-ips.yaml';interval=60} }
     $catalog=Get-DomainRuleSetCatalog
-    if ($s.direct.domain_rule_sets.Count) {
-        foreach ($d in $s.direct.rule_set_exclusions) { $rules.Add("DOMAIN-SUFFIX,$d,AWG") }
-    }
+    foreach ($d in $s.direct.rule_set_exclusions) { $rules.Add("DOMAIN-SUFFIX,$d,AWG") }
     foreach ($name in $s.direct.domain_rule_sets) {
         $rules.Add("RULE-SET,service-$name,DIRECT")
         $providers["service-$name"]=@{type='http';behavior='domain';format='text';url=$catalog[$name].url;path="./runtime/rules/services/$name.list";interval=21600;proxy='AWG';'size-limit'=1048576}
@@ -344,17 +541,42 @@ function New-ValidatedCoreConfig([string]$Root, $s, [bool]$TunEnabled, $Transpor
     # Protect known unrelated domains on shared CDN IPs from the DNS-IP fallback.
     $rules.Add('DOMAIN-REGEX,.+,AWG')
     if ($s.dns_update.enabled) { $rules.Add('RULE-SET,dns-ips,DIRECT,no-resolve') }
+    } elseif ($s.routing.allow_lan) {
+        # CGNAT is not a local LAN exception. Full mode has no process/domain/
+        # provider bypasses, including saved user exceptions and DNS-IP caches.
+        foreach ($cidr in @('127.0.0.0/8','10.0.0.0/8','172.16.0.0/12','192.168.0.0/16','169.254.0.0/16','::1/128','fc00::/7','fe80::/10')) {
+            $kind=if ($cidr.Contains(':')) { 'IP-CIDR6' } else { 'IP-CIDR' }
+            $rules.Add("$kind,$cidr,DIRECT,no-resolve")
+        }
+    }
     $rules.Add('MATCH,AWG')
     $dns=@{enable=$true;listen="127.0.0.1:$($s.ports.dns)";ipv6=($proxy.type -ne 'wireguard' -or $proxy.ContainsKey('ipv6'));'enhanced-mode'='fake-ip';'fake-ip-range'='198.18.0.1/16';'fake-ip-filter'=@('*.lan','*.local','localhost');'default-nameserver'=@('1.1.1.1','8.8.8.8');nameserver=@('https://cloudflare-dns.com/dns-query','https://dns.google/dns-query');'proxy-server-nameserver'=@('https://cloudflare-dns.com/dns-query#DIRECT','https://dns.google/dns-query#DIRECT');'direct-nameserver'=@('https://cloudflare-dns.com/dns-query#DIRECT','https://dns.google/dns-query#DIRECT');'respect-rules'=$true}
+    $hosts=@{}
+    if ($full) {
+        # Literal HTTPS resolver endpoints avoid a plaintext DNS bootstrap. The
+        # VPN server hostname alone is resolved before TUN startup and pinned in
+        # hosts for this session; it is never a general direct resolver path.
+        $dns['nameserver']=@('https://1.1.1.1/dns-query#AWG','https://8.8.8.8/dns-query#AWG')
+        $dns['default-nameserver']=@($dns.nameserver)
+        $dns['proxy-server-nameserver']=@($dns.nameserver)
+        $dns['direct-nameserver']=@($dns.nameserver)
+        $dns['use-hosts']=$true; $dns['use-system-hosts']=$false
+        if (!$s.routing.allow_lan) { $dns['fake-ip-filter']=@('localhost') }
+        $pinnedLiteral=$null
+        if (![Net.IPAddress]::TryParse($proxy.server,[ref]$pinnedLiteral)) {
+            if (!$Transport -or $Transport.server -ne $proxy.server -or $Transport.port -ne $proxy.port) { throw 'Full routing requires a resolved VPN endpoint before configuration' }
+            $hosts[$proxy.server]=$Transport.selected_address
+        }
+    }
     return @{
         'mixed-port'=$s.ports.proxy;'allow-lan'=$false;'bind-address'='127.0.0.1';mode='rule';'log-level'='warning';ipv6=$true
         # Socket-table enumeration is unnecessary when there are no EXE rules.
         # With EXE rules, strict performs the same lookup when their turn arrives.
-        'find-process-mode'=$(if ($s.direct.process_names.Count -or $s.direct.process_paths.Count) {'strict'} else {'off'});'external-controller'="127.0.0.1:$($s.ports.controller)";secret=(Get-Content -LiteralPath (Join-Path $Root 'private\api-token.txt') -Raw).Trim()
+        'find-process-mode'=$(if (!$full -and ($s.direct.process_names.Count -or $s.direct.process_paths.Count)) {'strict'} else {'off'});'external-controller'="127.0.0.1:$($s.ports.controller)";secret=(Get-Content -LiteralPath (Join-Path $Root 'private\api-token.txt') -Raw).Trim()
         'geo-auto-update'=$false;profile=@{'store-fake-ip'=$true};proxies=@($proxy);rules=@($rules.ToArray());dns=$dns
         tun=@{enable=$TunEnabled;stack='system';device='Mukhomor';'auto-route'=$true;'auto-detect-interface'=$true;'strict-route'=$true;'dns-hijack'=@('any:53','tcp://any:53');mtu=1500;'inet6-address'=@('fdfe:dcba:9876::1/126');'route-exclude-address'=$endpointPrefixes;'udp-timeout'=300}
         sniffer=@{enable=$true;'force-dns-mapping'=$true;'parse-pure-ip'=$true;'override-destination'=$false;sniff=@{HTTP=@{ports=@(80,'8080-8880')};TLS=@{ports=@(443,8443)};QUIC=@{ports=@(443,8443)}}}
-        'rule-providers'=$providers
+        'rule-providers'=$providers; hosts=$hosts
     }
 }
 
@@ -395,20 +617,26 @@ function Invoke-CoreApi([string]$Root, [string]$Route, [string]$Method='GET', $B
     # port; normalizing thousands of exception entries for every probe, provider
     # update and DNS observation needlessly competes with the VPN for CPU.
     $s=[IO.File]::ReadAllText((Join-Path $Root 'settings.json'),[Text.Encoding]::UTF8) | ConvertFrom-Json
-    if ($s.schema -ne 1 -or $s.ports.controller -isnot [int] -or $s.ports.controller -lt 1024 -or $s.ports.controller -gt 65535) { throw 'Invalid controller settings' }
+    if ($s.schema -notin @(1,2) -or $s.ports.controller -isnot [int] -or $s.ports.controller -lt 1024 -or $s.ports.controller -gt 65535) { throw 'Invalid controller settings' }
     $token=(Get-Content -LiteralPath (Join-Path $Root 'private\api-token.txt') -Raw).Trim()
     $params=@{Uri="http://127.0.0.1:$($s.ports.controller)$Route";Method=$Method;Headers=@{Authorization="Bearer $token"};TimeoutSec=$TimeoutSeconds;UseBasicParsing=$true}
     if ($null -ne $Body) { $params.Body=($Body | ConvertTo-Json -Depth 40); $params.ContentType='application/json' }
     return Invoke-RestMethod @params
 }
 
-function Set-SplitConfig([string]$Root, $Settings, [bool]$TunEnabled=$true, [switch]$Reload, $Transport=$null, [switch]$PassThru) {
+function Set-SplitConfig([string]$Root, $Settings, [bool]$TunEnabled=$true, [switch]$Reload, $Transport=$null, [switch]$PassThru, $RuleIssues=$null) {
+    if ($null -ne $RuleIssues -and $RuleIssues -isnot [System.Management.Automation.PSReference]) {throw 'RuleIssues must be a reference'}
     Initialize-SplitRoot $Root
     Invoke-SplitLock $Root {
         $normalized=Get-SplitSettings $Root $Settings
+        if ($Reload) {
+            $currentPolicy=(Get-SplitSettings $Root).routing
+            if ($normalized.routing.mode -cne $currentPolicy.mode -or $normalized.routing.allow_lan -ne $currentPolicy.allow_lan) { throw 'Disconnect VPN before changing routing mode or LAN access' }
+        }
         $candidate=Join-Path $Root 'private\candidate.json'
         $live=Join-Path $Root 'private\config.json'
-        Write-AtomicJson $candidate (New-ValidatedCoreConfig $Root $normalized $TunEnabled $Transport)
+        $projectedIssues=$null
+        Write-AtomicJson $candidate (New-ValidatedCoreConfig $Root $normalized $TunEnabled $Transport -RuleIssues ([ref]$projectedIssues))
         Test-CoreConfig $Root $candidate
         $old=if (Test-Path -LiteralPath $live) { [IO.File]::ReadAllText($live) } else { $null }
         $oldSettings=[IO.File]::ReadAllText((Join-Path $Root 'settings.json'))
@@ -423,12 +651,16 @@ function Set-SplitConfig([string]$Root, $Settings, [bool]$TunEnabled=$true, [swi
             if ($Reload -and $old) { try { Invoke-CoreApi $Root '/configs?force=true' 'PUT' @{path=$live} | Out-Null } catch {} }
             throw
         }
+        # Publish diagnostics only after the candidate has passed core validation
+        # and committed. ApplySettings need not normalize all rules a second time.
+        if ($null -ne $RuleIssues) {$RuleIssues.Value=$projectedIssues}
         if ($PassThru) { return $normalized }
     }
 }
 
 function Update-SplitRuleSets([string]$Root) {
-    $settings=Get-SplitSettings $Root; $updated=0; $errors=0
+    $settings=Get-EffectiveSplitSettings (Get-SplitSettings $Root); $updated=0; $errors=0
+    if ($settings.routing.mode -ceq 'full') { return @{updated=0;api_errors=0;disabled=$true} }
     foreach ($name in $settings.direct.domain_rule_sets) {
         try {
             Invoke-CoreApi $Root ("/providers/rules/service-$name") 'PUT' -TimeoutSeconds 2 | Out-Null
@@ -536,7 +768,10 @@ function Update-SplitDns([string]$Root, [switch]$Force, [scriptblock]$Resolver=$
     Initialize-SplitRoot $Root
     Invoke-SplitLock $Root {
         $batchTimer=[Diagnostics.Stopwatch]::StartNew()
-        $s=Get-SplitSettings $Root
+        $s=Get-EffectiveSplitSettings (Get-SplitSettings $Root)
+        # Full routing never observes or resolves saved bypass domains. The
+        # refresh task may still be scheduled by an older service configuration.
+        if ($s.routing.mode -ceq 'full') { return @{hosts=0;ip_addresses=0;api_errors=0;disabled=$true} }
         $statePath=Join-Path $Root 'runtime\dns-state.json'
         $state=if (Test-Path -LiteralPath $statePath) { Read-JsonFile $statePath } else { @{schema=1;hosts=@{}} }
         if ($state.schema -ne 1 -or $state.hosts -isnot [hashtable]) { throw 'Invalid DNS cache; previous rules retained' }

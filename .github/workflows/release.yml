@@ -32,7 +32,10 @@ jobs:
           $log=[IO.File]::ReadAllText((Join-Path $PWD 'CHANGELOG.md'))
           $section=[regex]::Match($log,'(?ms)^## \['+[regex]::Escape($version)+'\][^\n]*\n(?<body>.*?)(?=^## |\z)')
           if(!$section.Success -or !$section.Groups['body'].Value.Trim()){throw 'Missing release notes'}
-          [IO.File]::WriteAllText((Join-Path $env:RUNNER_TEMP 'release-notes.md'),$section.Groups['body'].Value.Trim(),(New-Object Text.UTF8Encoding($false)))
+          $body=$section.Groups['body'].Value.Trim()
+          $base='https://github.com/'+$env:GITHUB_REPOSITORY+'/blob/'+$tag+'/'
+          $body=$body.Replace('](docs/',']('+$base+'docs/').Replace('](ROADMAP.md)',']('+$base+'ROADMAP.md)')
+          [IO.File]::WriteAllText((Join-Path $env:RUNNER_TEMP 'release-notes.md'),$body,(New-Object Text.UTF8Encoding($false)))
           Add-Content -LiteralPath $env:GITHUB_ENV -Value ('RELEASE_VERSION='+$version)
       - name: Public source boundary
         run: .\tests\Test-PublicSource.ps1
@@ -43,7 +46,7 @@ jobs:
       - name: Fetch verified dependencies
         run: .\Fetch-Dependencies.ps1
       - name: Rust tests
-        run: cargo +stable test --manifest-path .\native\Cargo.toml --locked
+        run: cargo +stable test --manifest-path .\native\Cargo.toml --locked -- --test-threads=1
       - name: Build release packages
         run: .\Build-Release.ps1 -Version $env:RELEASE_VERSION
       - name: Isolated application checks
@@ -62,12 +65,17 @@ jobs:
             dist/*.zip
             dist/*.sha256
           if-no-files-found: error
-      - name: Create draft release with packages
+      - name: Create draft release without replacing an existing release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
+          $headers=@{Authorization=('Bearer '+$env:GH_TOKEN);Accept='application/vnd.github+json'}
+          $existing=$null
+          try {$existing=Invoke-RestMethod -Uri ('https://api.github.com/repos/'+$env:GH_REPO+'/releases/tags/'+$env:RELEASE_TAG) -Headers $headers}
+          catch {if(!$_.Exception.Response -or [int]$_.Exception.Response.StatusCode -ne 404){throw}}
+          if($existing){Write-Host 'Release already exists; its reviewed notes and assets are preserved.';exit 0}
           $files=@(Get-ChildItem -LiteralPath .\dist -File | Where-Object {$_.Name -match ('^Mukhomor-'+[regex]::Escape($env:RELEASE_VERSION)+'-(windows-x64|source)\.zip(\.sha256)?$')} | ForEach-Object {$_.FullName})
           if($files.Count -ne 4){throw 'Expected exactly two archives and two checksums'}
           & gh release create $env:RELEASE_TAG @files --verify-tag --draft --title ('Mukhomor '+$env:RELEASE_VERSION) --notes-file (Join-Path $env:RUNNER_TEMP 'release-notes.md')

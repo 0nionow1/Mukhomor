@@ -1,11 +1,13 @@
-﻿param([string]$Executable,[string]$Base,[switch]$RecoveryOnly)
+param([string]$Executable,[string]$Base,[switch]$RecoveryOnly,[switch]$LargeRulesOnly)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
+. (Join-Path $PSScriptRoot 'Set-OwnedTestRoot.ps1')
 $package=if($Base){[IO.Path]::GetFullPath($Base)}else{Split-Path -Parent $PSScriptRoot}
 if (!$Executable) {$Executable=Join-Path $package 'native\target\release\mukhomor.exe'}
 $Executable=[IO.Path]::GetFullPath($Executable)
 $fixture=Join-Path $PSScriptRoot ('native-'+[guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($fixture) | Out-Null
+Set-OwnedTestRoot $fixture $fixture
 [IO.File]::WriteAllText((Join-Path $fixture 'qa.marker'),'isolated test; no network connection')
 $passed=0; $worker=$null
 function Assert($Condition,[string]$Message) {if(!$Condition){throw ('FAIL: '+$Message)}; $script:passed++}
@@ -105,6 +107,24 @@ function Save-ProfileIndex($Index) {
         $child.Dispose()
     }
 }
+function Test-LargeSettings {
+    $beforeLarge=(Request @{action='Status'}).data.settings
+    $largeSettings=$beforeLarge|ConvertTo-Json -Depth 40|ConvertFrom-Json
+    $largeSettings.presets=@()
+    $largeSettings.direct.domains=@(1..5000|ForEach-Object {"exact$_.native-fixture.test"})
+    $largeSettings.direct.domain_suffixes=@(1..5000|ForEach-Object {"suffix$_.native-fixture.test"})
+    $largeSettings.direct.ip_cidrs=@(1..5000|ForEach-Object {'203.0.'+[int][Math]::Floor($_/256)+'.'+($_%256)+'/32'})
+    $largeSettings.dns_update.enabled=$false;$largeSettings.dns_update.seed_hosts=@()
+    $watch=[Diagnostics.Stopwatch]::StartNew()
+    $largeApplied=Request @{action='ApplySettings';settings=$largeSettings}
+    Write-Host ('Large settings elapsed ms: '+[math]::Round($watch.Elapsed.TotalMilliseconds))
+    if(!$largeApplied.ok){Write-Host ('Large settings failure: '+$largeApplied.error)}
+    Assert ($largeApplied.ok -and !$largeApplied.data.busy -and !$largeApplied.data.running -and $largeApplied.data.settings.direct.domains.Count -eq 5000 -and $largeApplied.data.settings.direct.domain_suffixes.Count -eq 5000 -and $largeApplied.data.settings.direct.ip_cidrs.Count -eq 5000) '15000 exceptions apply through the real controller within its normal operation deadline'
+    Assert ($largeApplied.data.rule_issues_total -eq 0 -and @($largeApplied.data.rule_issues).Count -eq 0) 'reused empty diagnostics remain an empty array through real IPC'
+    $largeConfig=[IO.File]::ReadAllText((Join-Path $fixture 'private\config.json'))|ConvertFrom-Json
+    Assert ($largeConfig.'rule-providers'.'custom-domains'.payload.Count -eq 10000 -and $largeConfig.'rule-providers'.'custom-ips'.payload.Count -eq 5000 -and $largeConfig.rules.Count -lt 100) 'maximum custom lists compile into bounded native rule groups without losing entries'
+    Assert (Request @{action='ApplySettings';settings=$beforeLarge}).ok 'large-list apply can restore the previous preferences without altering the selected profile'
+}
 # Public, non-routable fixture; these are test-vector keys, never a real profile.
 $profile=@'
 [Interface]
@@ -130,9 +150,50 @@ try {
     Test-SelectRollback
     if($RecoveryOnly){Write-Host ('PASS: '+$passed+' pure Select rollback assertions');return}
     Start-Worker
+    if($LargeRulesOnly){
+        Assert (Request @{action='Import';name='Large-list fixture';content=$profile}).ok 'large-list fixture profile imported'
+        Test-LargeSettings
+        Request @{action='ShutdownWorker'}|Out-Null
+        Assert ($worker.WaitForExit(30000)) 'large-list controller shuts down cleanly'
+        Write-Host ('PASS: '+$passed+' large-list IPC assertions')
+        return
+    }
     $fresh=Request @{action='Status'}
+    $unchanged=Request @{action='Status';if_revision=$fresh.revision}
+    Assert ($unchanged.ok -and $unchanged.not_modified -and !($unchanged.PSObject.Properties.Name -contains 'data')) 'unchanged status sends a revision acknowledgement without the full model'
+    Assert ((Request @{action='Status';if_revision='previous-controller'}).data.service_ready) 'stale controller token requests a full snapshot'
     Assert (!$fresh.data.running -and @($fresh.data.profiles).Count -eq 0) 'fresh install remains disconnected'
-    Assert ($fresh.data.settings.direct.process_names -contains 'qbittorrent.exe') 'public torrent bypass preset'
+    Assert (@($fresh.data.settings.presets|Where-Object {$_.builtin_id -eq 'torrent'})[0].rules.process_names -contains 'qbittorrent.exe') 'public torrent bypass preset'
+    $presetDraft=$fresh.data.settings|ConvertTo-Json -Depth 40|ConvertFrom-Json
+    $presetDraft.presets+=@([pscustomobject]@{id='qa-custom';name='Custom fixture';description='Editable';enabled=$true;visible_sections=@();disabled_sections=@();domain_rule_sets=@();rules=@{process_names=@('fixture.exe');process_paths=@();domains=@('fixture.example','invalid,REJECT');domain_suffixes=@();ip_cidrs=@();rule_set_exclusions=@()}})
+    $validated=Request @{action='ValidateSettings';settings=$presetDraft}
+    Assert ($validated.ok -and @($validated.data.rule_issues|Where-Object {$_.preset_id -eq 'qa-custom' -and $_.section -eq 'domains' -and $_.line -eq 2}).Count -eq 1) 'advisory validation identifies preset owner without saving'
+    Assert (@((Request @{action='Status'}).data.settings.presets|Where-Object {$_.id -eq 'qa-custom'}).Count -eq 0) 'validation does not mutate persisted presets'
+    $presetSaved=Request @{action='ApplySettings';settings=$presetDraft}
+    Assert ($presetSaved.ok -and @($presetSaved.data.settings.presets|Where-Object {$_.id -eq 'qa-custom'})[0].rules.domains[1] -eq 'invalid,REJECT') 'saving malformed rule retains raw text and valid siblings'
+    $presetStatus=Request @{action='Status'}
+    Assert (@($presetStatus.data.rule_issues|Where-Object {$_.preset_id -eq 'qa-custom'}).Count -eq 1) 'warning survives controller status reconciliation'
+    Assert (Request @{action='ApplySettings';settings=$fresh.data.settings}).ok 'removing custom preset restores baseline without touching servers'
+    $largeDraft=$fresh.data.settings|ConvertTo-Json -Depth 40|ConvertFrom-Json
+    $largeDraft.direct.domains=@(1..2000|ForEach-Object {('x'*1000)+'.example'})
+    $largeSaved=Request @{action='ApplySettings';settings=$largeDraft}
+    Assert ($largeSaved.ok -and $largeSaved.data.rule_issues_total -eq 2000 -and @($largeSaved.data.rule_issues).Count -eq 200) 'near-limit raw lists save through real IPC with bounded warnings'
+    $largeStatus=Request @{action='Status'}
+    Assert ($largeStatus.ok -and $largeStatus.data.settings.direct.domains.Count -eq 2000 -and $largeStatus.data.rule_issues_total -eq 2000) 'large saved draft remains accessible through status'
+    $beforeOversize=[IO.File]::ReadAllText((Join-Path $fixture 'settings.json'))
+    $largeDraft.direct.domains=@(1..2200|ForEach-Object {('x'*1000)+'.example'})
+    $oversize=Request @{action='ApplySettings';settings=$largeDraft}
+    Assert (!$oversize.ok -and $oversize.error -like 'Settings exceed 2 MiB*' -and [IO.File]::ReadAllText((Join-Path $fixture 'settings.json')) -ceq $beforeOversize) 'oversized draft reports a clear error and leaves saved settings unchanged'
+    Request @{action='ShutdownWorker'}|Out-Null
+    Assert ($worker.WaitForExit(30000)) 'large-settings worker stops cleanly'
+    Start-Worker
+    $largeRestart=Request @{action='Status'}
+    Assert ($largeRestart.ok -and $largeRestart.data.settings.direct.domains.Count -eq 2000 -and $largeRestart.data.rule_issues_total -eq 2000 -and @($largeRestart.data.rule_issues).Count -eq 200) 'large saved lists and warnings survive real bridge initialization'
+    $escapedDraft=$fresh.data.settings|ConvertTo-Json -Depth 40|ConvertFrom-Json
+    $escapedDraft.direct.domains=@(1..200|ForEach-Object {"'"*1024})+@(1..800|ForEach-Object {'x'*1024})
+    $escapedSaved=Request @{action='ApplySettings';settings=$escapedDraft}
+    Assert ($escapedSaved.ok -and $escapedSaved.data.rule_issues_total -eq 1000 -and @($escapedSaved.data.rule_issues).Count -gt 0 -and @($escapedSaved.data.rule_issues).Count -lt 200 -and $escapedSaved.data.settings.direct.domains.Count -eq 1000) 'PowerShell HTML escaping cannot overflow real IPC diagnostic replies or truncate raw rules'
+    Assert (Request @{action='ApplySettings';settings=$fresh.data.settings}).ok 'restoring baseline after byte-budget checks preserves the profile workflow'
     $first=Request @{action='Import';name='Test A';content=$profile}
     if(!$first.ok){Write-Host ('Public fixture import failure: '+$first.error)}
     Assert ($first.ok -and @($first.data.profiles).Count -eq 1) 'first profile imported'
@@ -162,6 +223,9 @@ try {
     $traversal=Request @{action='Remove';id='..\..\other'}
     Assert (!$traversal.ok) 'profile ID traversal rejected'
     $s=$snapshot.data.settings
+    # This case checks small standalone rule emission. Bundled suffixes may
+    # legitimately cross the inline-provider threshold; presets are tested above.
+    $s.presets=@()
     $s.direct.process_names=@('cs2.exe','qbittorrent.exe')
     $s.direct.process_paths=@('C:\Games\Example\game.exe')
     $s.direct.domains=@('exact.example.com')
@@ -182,7 +246,9 @@ try {
     $invalid=$saved.data.settings|ConvertTo-Json -Depth 40|ConvertFrom-Json
     $invalid.direct.ip_cidrs=@('0.0.0.0/0')
     $rejected=Request @{action='ApplySettings';settings=$invalid}
-    Assert (!$rejected.ok) 'invalid full-traffic bypass rejected'
+    Assert ($rejected.ok -and $rejected.data.settings.direct.ip_cidrs[0] -eq '0.0.0.0/0' -and @($rejected.data.rule_issues|Where-Object {$_.section -eq 'ip_cidrs' -and $_.code -eq 'invalid_rule'}).Count -eq 1) 'invalid full-traffic bypass retained with a warning'
+    $invalidConfig=[IO.File]::ReadAllText((Join-Path $fixture 'private\config.json'))|ConvertFrom-Json
+    Assert (!(@($invalidConfig.rules|Where-Object {$_ -match '^IP-CIDR,0\.0\.0\.0/0,'}).Count)) 'invalid bypass cannot become an executable all-traffic rule'
     $switch=Request @{action='Select';id=$idB}
     Assert ($switch.ok -and $switch.data.selected -eq $idB) 'profile switches while disconnected'
     Assert ($switch.data.settings.direct.domains -contains 'exact.example.com' -and $switch.data.settings.dns_update.min_refresh_seconds -eq 45) 'switch preserves exclusions and DNS preferences'
@@ -300,6 +366,7 @@ try {
     # Model an on-disk library created before normalized node storage existed.
     # Change only this stopped worker's TEST-NET fixture, retaining its IDs.
     $legacyIndex=[IO.File]::ReadAllText($libraryPath)|ConvertFrom-Json
+    $legacyIndex.PSObject.Properties.Remove('last_connected')
     $legacyEntry=@($legacyIndex.profiles|Where-Object {$_.id -eq $idA})[0]
     $legacyEntry.PSObject.Properties.Remove('format')
     $legacyEntry.PSObject.Properties.Remove('protocol')
@@ -314,27 +381,22 @@ try {
     Start-Worker
     $restart=Request @{action='Status'}
     Assert ($restart.data.selected -eq $idB -and @($restart.data.profiles).Count -eq 2 -and !$restart.data.running) 'profile library survives service process restart'
+    Assert ($restart.data.last_connected -eq $idB) 'legacy selected server is frozen as startup history during migration'
     Assert ($restart.data.service_ready -and $restart.data.dns_recovery_pending -and (Test-Path -LiteralPath $backup)) 'deferred DNS recovery keeps IPC available and snapshot intact'
     Assert (!(Test-Path -LiteralPath (Join-Path $fixture 'runtime\stop.request'))) 'stale shutdown marker is removed at service startup'
     [IO.File]::Delete($backup)
     $legacySwitch=Request @{action='Select';id=$idA}
     Assert ($legacySwitch.ok -and $legacySwitch.data.selected -eq $idA -and !$legacySwitch.data.running -and @($legacySwitch.data.profiles).Count -eq 2) 'a pre-upgrade conf entry without format and protocol remains selectable'
+    Assert ($legacySwitch.data.last_connected -eq $idB) 'idle selection does not replace the last connected server'
     $legacyConfig=[IO.File]::ReadAllText((Join-Path $fixture 'private\config.json'))|ConvertFrom-Json
     Assert (@($legacyConfig.proxies)[0].type -eq 'wireguard' -and @($legacyConfig.proxies)[0].server -eq '192.0.2.1' -and $legacyConfig.rules -contains 'PROCESS-NAME,qbittorrent.exe,DIRECT') 'legacy conf conversion preserves its endpoint and split-routing settings'
     Assert (Request @{action='Select';id=$idB}).ok 'selection can return from pre-upgrade conf storage to normalized node storage'
-    $beforeLarge=(Request @{action='Status'}).data.settings
-    $largeSettings=$beforeLarge|ConvertTo-Json -Depth 40|ConvertFrom-Json
-    $largeSettings.direct.domains=@(1..5000|ForEach-Object {"exact$_.native-fixture.test"})
-    $largeSettings.direct.domain_suffixes=@(1..5000|ForEach-Object {"suffix$_.native-fixture.test"})
-    $largeSettings.direct.ip_cidrs=@(1..5000|ForEach-Object {'203.0.'+[int][Math]::Floor($_/256)+'.'+($_%256)+'/32'})
-    $largeSettings.dns_update.enabled=$false;$largeSettings.dns_update.seed_hosts=@()
-    $largeApplied=Request @{action='ApplySettings';settings=$largeSettings}
-    Assert ($largeApplied.ok -and !$largeApplied.data.busy -and !$largeApplied.data.running -and $largeApplied.data.settings.direct.domains.Count -eq 5000 -and $largeApplied.data.settings.direct.domain_suffixes.Count -eq 5000 -and $largeApplied.data.settings.direct.ip_cidrs.Count -eq 5000) '15000 exceptions apply through the real controller within its normal operation deadline'
-    $largeConfig=[IO.File]::ReadAllText((Join-Path $fixture 'private\config.json'))|ConvertFrom-Json
-    Assert ($largeConfig.'rule-providers'.'custom-domains'.payload.Count -eq 10000 -and $largeConfig.'rule-providers'.'custom-ips'.payload.Count -eq 5000 -and $largeConfig.rules.Count -lt 100) 'maximum custom lists compile into bounded native rule groups without losing entries'
-    Assert (Request @{action='ApplySettings';settings=$beforeLarge}).ok 'large-list apply can restore the previous preferences without altering the selected profile'
+    Test-LargeSettings
     $remove=Request @{action='Remove';id=$idA}
     Assert ($remove.ok -and @($remove.data.profiles).Count -eq 1 -and $remove.data.selected -eq $idB) 'remove inactive profile preserves selection'
+    Assert ($remove.data.last_connected -eq $idB) 'removing another profile preserves startup history'
+    $removeLast=Request @{action='Remove';id=$idB}
+    Assert ($removeLast.ok -and $removeLast.data.last_connected -ceq '' -and @($removeLast.data.profiles).Count -eq 0) 'removing the last connected server clears history without a fallback'
     # ShutdownWorker acknowledges before cleanup; its Disconnect helper has a 20 s hard limit.
     # Give that bounded cleanup time to finish on a cold Windows runner.
     Request @{action='ShutdownWorker'}|Out-Null

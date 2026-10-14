@@ -1,6 +1,7 @@
-﻿param([string]$Executable)
+param([string]$Executable)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
+. (Join-Path $PSScriptRoot 'Set-OwnedTestRoot.ps1')
 $package=Split-Path -Parent $PSScriptRoot
 if(!$Executable){$Executable=Join-Path $package 'native\target\release\mukhomor.exe'}
 $Executable=[IO.Path]::GetFullPath($Executable)
@@ -35,6 +36,7 @@ AllowedIPs = 0.0.0.0/0
 try {
     foreach($root in $roots){
         [IO.Directory]::CreateDirectory($root)|Out-Null
+        Set-OwnedTestRoot $root $fixture
         [IO.File]::WriteAllText((Join-Path $root 'qa.marker'),'Two isolated disconnected controllers; no system DNS or TUN')
         $worker=Start-Process -FilePath $Executable -ArgumentList ('--worker --base "'+$package+'" --root "'+$root+'" --output "'+(Join-Path $root 'worker-error.json')+'"') -PassThru -WindowStyle Hidden
         $workers.Add($worker);$ready=$false
@@ -48,11 +50,12 @@ try {
     Assert ($b.data.profiles.Count -eq 0 -and !$b.data.selected) 'instance B does not discover or inherit A profiles'
     $b=Request $roots[1] @{action='Import';name='Fixture B';content=$profile.Replace('192.0.2.1','192.0.2.2')}
     Assert ($b.ok -and $b.data.selected -ne $a.data.selected) 'profile identities remain separate across controllers'
+    $beforeBSettings=$b.data.settings|ConvertTo-Json -Depth 40 -Compress
     $s=$a.data.settings;$s.direct.process_names=@('fixture-a.exe');$s.direct.domains=@('a.example.com')
     $a=Request $roots[0] @{action='ApplySettings';settings=$s}
     Assert $a.ok 'A changes its own rules'
     $b=Request $roots[1] @{action='Status'}
-    Assert ($b.data.settings.direct.process_names -contains 'qbittorrent.exe' -and $b.data.settings.direct.domains -notcontains 'a.example.com') 'B retains independent public preset and rule settings'
+    Assert (($b.data.settings|ConvertTo-Json -Depth 40 -Compress) -ceq $beforeBSettings -and $b.data.settings.direct.domains -notcontains 'a.example.com') 'B retains independent public preset and rule settings'
     foreach($root in $roots){
         $config=Get-Content -LiteralPath (Join-Path $root 'private\config.json') -Raw|ConvertFrom-Json
         Assert ($config.tun.device -eq 'Mukhomor' -and $config.'mixed-port' -eq 19890 -and $config.'external-controller' -eq '127.0.0.1:19893' -and $config.dns.listen -eq '127.0.0.1:19853') 'generated TUN identity and ports do not share private VPN-Split defaults'

@@ -12,7 +12,7 @@ pub fn error_box(s: &str) {
         MessageBoxW(
             null_mut(),
             wide(s).as_ptr(),
-            wide("Mukhomor").as_ptr(),
+            wide(crate::APP_NAME).as_ptr(),
             MB_OK | MB_ICONERROR,
         );
     }

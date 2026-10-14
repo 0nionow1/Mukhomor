@@ -4,9 +4,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 
 function Get-SplitProfileCapabilities {
-    $labels=@{wireguard='WireGuard / AmneziaWG';vless='VLESS';vmess='VMess';trojan='Trojan';ss='Shadowsocks';ssr='ShadowsocksR';hysteria='Hysteria';hysteria2='Hysteria 2';tuic='TUIC';snell='Snell';socks5='SOCKS5';http='HTTP / HTTPS';ssh='SSH';anytls='AnyTLS';mieru='Mieru';trusttunnel='TrustTunnel';shadowquic='ShadowQUIC';'gost-relay'='GOST Relay';sudoku='Sudoku';masque='MASQUE';openvpn='OpenVPN'}
-    foreach($type in @('wireguard','vless','vmess','trojan','ss','ssr','hysteria','hysteria2','tuic','snell','socks5','http','ssh','anytls','mieru','trusttunnel','shadowquic','gost-relay','sudoku','masque','openvpn')){
-        @{type=$type;label=$labels[$type];json=$true;uri=($type -in @('vless','vmess','trojan','ss','ssr','hysteria','hysteria2','tuic','socks5','http','anytls'));conf=($type -eq 'wireguard');ovpn=($type -eq 'openvpn')}
+    $labels=@{wireguard='WireGuard / AmneziaWG';vless='VLESS';vmess='VMess';trojan='Trojan';ss='Shadowsocks';ssr='ShadowsocksR';hysteria='Hysteria';hysteria2='Hysteria 2';tuic='TUIC';snell='Snell';socks5='SOCKS5';http='HTTP / HTTPS';ssh='SSH';anytls='AnyTLS';mieru='Mieru';trusttunnel='TrustTunnel';shadowquic='ShadowQUIC';'gost-relay'='GOST Relay';sudoku='Sudoku';masque='MASQUE';openvpn='OpenVPN';mycelium='Mycelium (experimental)'}
+    foreach($type in @('wireguard','vless','vmess','trojan','ss','ssr','hysteria','hysteria2','tuic','snell','socks5','http','ssh','anytls','mieru','trusttunnel','shadowquic','gost-relay','sudoku','masque','openvpn','mycelium')){
+        @{type=$type;label=$labels[$type];json=$true;uri=($type -in @('vless','vmess','trojan','ss','ssr','hysteria','hysteria2','tuic','socks5','http','anytls','mycelium'));conf=($type -eq 'wireguard');ovpn=($type -eq 'openvpn')}
     }
 }
 
@@ -120,6 +120,9 @@ function Normalize-ProfileHost([string]$HostName) {
 }
 
 function Get-ProfileNodeFields([string]$Type) {
+    # This native adapter has a deliberately small import surface. Generic TLS
+    # options, transport headers, external paths and certificate bypasses are absent.
+    if($Type -eq 'mycelium'){return @('name','type','server','port','seed','sni','fingerprint','client-fingerprint','transport','udp-transport','udp')}
     $tls='alpn skip-cert-verify name-cert-verify fingerprint certificate private-key'
     $stream='network ws-opts http-opts h2-opts grpc-opts reality-opts packet-addr xudp packet-encoding'
     $fields=@{
@@ -234,12 +237,39 @@ function Convert-SplitNode($Node) {
     foreach($key in @('name','username','password','token','sni','servername','uuid','cipher','psk')){if($node.ContainsKey($key) -and $node[$key] -isnot [string]){throw 'Profile import: credential or identity option has an invalid type.'}}
     foreach($key in @('sni','servername')){if($proxy.ContainsKey($key) -and $proxy[$key] -match '[\r\n\x00]'){throw 'Profile import: invalid TLS server identity.'}}
     if(!$proxy.ContainsKey('server') -or $proxy.server -isnot [string]){throw 'Profile import: server is missing.'}
+    if($type -eq 'mycelium' -and $proxy.server -match '[\[\]]'){
+        $address=$null
+        if($proxy.server -notmatch '\A\[([^\]]+)\]\z' -or ![Net.IPAddress]::TryParse($Matches[1],[ref]$address) -or $address.AddressFamily -ne 'InterNetworkV6'){throw 'Profile import: invalid Mycelium server hostname.'}
+    }
     $proxy.server=Normalize-ProfileHost $proxy.server
     if(!$proxy.ContainsKey('port') -or [string]$proxy.port -notmatch '^\d{1,5}$' -or [int]$proxy.port -lt 1 -or [int]$proxy.port -gt 65535){throw 'Profile import: endpoint port must be between 1 and 65535.'}
     $proxy.port=[int]$proxy.port
     foreach($key in @('tls','udp','skip-cert-verify','tfo','mptcp','packet-addr','xudp','global-padding','authenticated-length','reuse','disable-mtu-discovery','fast-open','reduce-rtt','disable-sni','udp-over-stream','udp-over-tcp','zero-rtt','disable-reuse','health-check','quic','remote-dns-resolve','enable-pure-downlink','http-mask','http-mask-tls','forward','mux')){if($proxy.ContainsKey($key) -and $proxy[$key] -isnot [bool]){throw 'Profile import: boolean node option has an invalid type.'}}
-    $required=@{ss=@('password','cipher');ssr=@('password','cipher','protocol','obfs');vmess=@('uuid');vless=@('uuid');trojan=@('password');snell=@('psk');anytls=@('password');mieru=@('username','password','transport');ssh=@('username');sudoku=@('key');wireguard=@('private-key','public-key','ip');masque=@('private-key','public-key');openvpn=@('ca')}
+    $required=@{ss=@('password','cipher');ssr=@('password','cipher','protocol','obfs');vmess=@('uuid');vless=@('uuid');trojan=@('password');snell=@('psk');anytls=@('password');mieru=@('username','password','transport');ssh=@('username');sudoku=@('key');wireguard=@('private-key','public-key','ip');masque=@('private-key','public-key');openvpn=@('ca');mycelium=@('seed')}
     if($required.ContainsKey($type)){foreach($key in $required[$type]){if(!$proxy.ContainsKey($key) -or $proxy[$key] -isnot [string] -or !$proxy[$key]){throw 'Profile import: a required protocol credential or option is missing.'}}}
+    if($type -eq 'mycelium'){
+        if($proxy.seed -notmatch '\A[A-Fa-f0-9]{64}\z'){throw 'Profile import: Mycelium seed must contain exactly 32 bytes encoded as hexadecimal.'}
+        if($proxy.seed -eq ('0'*64)){throw 'Profile import: Mycelium seed must not be all zero.'}
+        $proxy.seed=$proxy.seed.ToLowerInvariant()
+        if(!$proxy.ContainsKey('sni')){$proxy.sni=$proxy.server}
+        if($proxy.sni -match '[\[\]]'){throw 'Profile import: invalid Mycelium TLS server identity.'}
+        $proxy.sni=Normalize-ProfileHost $proxy.sni
+        if($proxy.ContainsKey('fingerprint')){
+            $pin=$proxy.fingerprint
+            if($pin -isnot [string] -or $pin -notmatch '\A(?:[A-Fa-f0-9]{64}|[A-Fa-f0-9]{2}(?::[A-Fa-f0-9]{2}){31})\z'){throw 'Profile import: Mycelium certificate fingerprint must be a SHA256 hexadecimal digest.'}
+            $proxy.fingerprint=$pin.Replace(':','').ToLowerInvariant()
+        }
+        if($proxy.ContainsKey('client-fingerprint')){
+            $client=$proxy['client-fingerprint']
+            if($client -isnot [string] -or $client -notin @('chrome','firefox','safari','edge','safari26.3','firefox148-compatible')){throw 'Profile import: unsupported Mycelium TLS client fingerprint.'}
+            $proxy['client-fingerprint']=$client.ToLowerInvariant()
+        }
+        if($proxy.ContainsKey('transport') -and ($proxy.transport -isnot [string] -or $proxy.transport -notin @('auto','h2','websocket'))){throw 'Profile import: unsupported Mycelium transport.'}
+        if($proxy.ContainsKey('udp-transport')){
+            if($proxy['udp-transport'] -isnot [string] -or $proxy['udp-transport'] -notin @('auto','h3','websocket')){throw 'Profile import: unsupported Mycelium UDP transport.'}
+            $proxy['udp-transport']=$proxy['udp-transport'].ToLowerInvariant()
+        }
+    }
     if($type -in @('vmess','vless') -or ($type -eq 'tuic' -and $proxy.ContainsKey('uuid'))){$uuid=[guid]::Empty;if(![guid]::TryParse([string]$proxy.uuid,[ref]$uuid)){throw 'Profile import: invalid UUID.'};$proxy.uuid=$uuid.ToString()}
     if($type -eq 'vmess'){if(!$proxy.ContainsKey('alterId')){$proxy.alterId=0};if(!$proxy.ContainsKey('cipher')){$proxy.cipher='auto'}}
     if($type -eq 'tuic' -and !$proxy.ContainsKey('token') -and (!$proxy.ContainsKey('uuid') -or !$proxy.ContainsKey('password'))){throw 'Profile import: TUIC authentication is missing.'}
@@ -270,7 +300,7 @@ function Convert-SplitNode($Node) {
         if(!$proxy.ContainsKey('udp')){$proxy.udp=($version -ge 3)}
     }elseif($type -eq 'masque' -and $proxy.ContainsKey('network') -and $proxy.network -eq 'h3-l4proxy'){
         if($proxy.ContainsKey('udp') -and $proxy.udp){throw 'Profile import: MASQUE h3-l4proxy does not support UDP.'};$proxy.udp=$false
-    }elseif($type -in @('wireguard','ss','ssr','vmess','vless','trojan','socks5','anytls','mieru','trusttunnel','gost-relay','masque','openvpn') -and !$proxy.ContainsKey('udp')){$proxy.udp=$true}
+    }elseif($type -in @('wireguard','ss','ssr','vmess','vless','trojan','socks5','anytls','mieru','trusttunnel','gost-relay','masque','openvpn','mycelium') -and !$proxy.ContainsKey('udp')){$proxy.udp=$true}
     return $proxy
 }
 
@@ -353,6 +383,12 @@ function Convert-ProfileLink([string]$Link) {
         return @{name=$name;proxy=(Convert-SplitNode $proxy)}
     }
     $queryText='';if($body.Contains('?')){$parts=$body.Split([char[]]@('?'),2);$body=$parts[0];$queryText=$parts[1]}
+    if($scheme -eq 'mycelium'){
+        # Require one unescaped seed, an explicit port and no path. In particular,
+        # generic URI conveniences must not reinterpret Mycelium credentials.
+        if($body -notmatch '\A[A-Fa-f0-9]{64}@(?:\[([^\]]+)\]|([^:@/\s]+)):[0-9]{1,5}\z'){throw 'Profile import: invalid Mycelium share-link credentials or endpoint.'}
+        if($Matches[1]){$address=$null;if(![Net.IPAddress]::TryParse($Matches[1],[ref]$address) -or $address.AddressFamily -ne 'InterNetworkV6'){throw 'Profile import: bracketed Mycelium endpoints must be IPv6 addresses.'}}
+    }
     if($scheme -eq 'ss' -and !$body.Contains('@')){$body=Convert-ProfileBase64 $body}
     $at=$body.LastIndexOf('@');$user=if($at -ge 0){Decode-ProfileUri $body.Substring(0,$at)}else{''};$endpoint=if($at -ge 0){$body.Substring($at+1)}else{$body}
     $endpoint=$endpoint.TrimEnd('/');if($endpoint.Contains('/')){throw 'Profile import: unexpected share-link path.'}
@@ -364,6 +400,15 @@ function Convert-ProfileLink([string]$Link) {
     $proxy=@{type=$type;server=$server;port=$port}
     $common=@('sni','peer','servername','insecure','allowinsecure','allow_insecure','skip-cert-verify','alpn','fp')
     switch($type){
+        'mycelium' {
+            $query=Read-ProfileQuery $queryText @('sni','fp','client-fingerprint','udp','udp-transport')
+            $proxy.seed=$user
+            if($query.ContainsKey('sni')){$proxy.sni=$query.sni}
+            if($query.ContainsKey('fp')){$proxy.fingerprint=$query.fp}
+            if($query.ContainsKey('client-fingerprint')){$proxy['client-fingerprint']=$query['client-fingerprint']}
+            if($query.ContainsKey('udp')){$proxy.udp=Convert-ProfileBoolean $query.udp}
+            if($query.ContainsKey('udp-transport')){$proxy['udp-transport']=$query['udp-transport']}
+        }
         {$_ -in @('vless','trojan')} {
             $query=Read-ProfileQuery $queryText ($common+@('security','type','network','host','path','servicename','flow','encryption','pbk','sid','mode'))
             if($type -eq 'vless'){$proxy.uuid=$user}else{$proxy.password=$user}
@@ -483,7 +528,7 @@ function Convert-SplitProfileText([string]$Text,[string]$Format='auto',[string]$
     $nodes=New-Object Collections.Generic.List[object]
     try{
         if($format -eq 'auto'){
-            $format=if($text -match '^\[Interface\]'){'conf'}elseif($text -match '^[\[{]'){'json'}elseif($text -match '^[A-Za-z0-9]+://'){'uri'}elseif($text -match '(?m)^\s*(client|<ca>|<cert>|remote\s)'){'ovpn'}elseif($text -match '^[A-Za-z][A-Za-z0-9_-]*:|^- '){'yaml'}else{'base64'}
+            $format=if($text -match '^\[Interface\]'){'conf'}elseif($text -match '^[\[{]'){'json'}elseif($text -match '^[A-Za-z0-9]+://'){'uri'}elseif($text -match '(?m)^\s*(client(?:\s|$)|<ca>|<cert>|remote\s)'){'ovpn'}elseif($text -match '^[A-Za-z][A-Za-z0-9_-]*:|^- '){'yaml'}else{'base64'}
         }
         switch($format){
             'conf' {$proxy=Convert-AwgProfileText $text;$nodes.Add(@{name=$Name;proxy=$proxy})}

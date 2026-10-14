@@ -1,31 +1,43 @@
 {
   "schema": 1,
-  "bundled_on": "2026-10-08",
+  "bundled_on": "2026-10-13",
   "license": "GPL-3.0, Rules-LICENSE.txt",
-  "modified": "Sorted and exact duplicates removed; matching semantics preserved.",
+  "modified": "Sorted and exact duplicates removed. Existing Russian seed entries retained; game public-suffix bypass in.th excluded in the Games preset.",
   "sources": {
     "russia": {
       "url": "https://github.com/MetaCubeX/meta-rules-dat/blob/meta/geo/geosite/category-ru.list",
       "download_url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ru.list",
-      "modified": "2026-10-08T02:12:40Z",
-      "entries": 1105,
+      "snapshot_on": "2026-10-13",
+      "entries": 1122,
+      "seed_sha256": "2992f51dde679482ba9f6f2994ac0b2b3cb5fd6a90fec7619aee617d12b19d20",
       "active_by_default": true,
       "interval_seconds": 21600
     },
     "steam": {
       "url": "https://github.com/MetaCubeX/meta-rules-dat/blob/meta/geo/geosite/steam.list",
       "download_url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/steam.list",
-      "modified": "2026-10-08T02:12:40Z",
+      "snapshot_on": "2026-10-13",
       "entries": 60,
+      "seed_sha256": "0614d688a1f36f9e8c5d95c2adbc3778ada53fc0e827432cb6c67231f5eab216",
       "active_by_default": true,
       "interval_seconds": 21600
     },
     "ozon": {
       "url": "https://github.com/MetaCubeX/meta-rules-dat/blob/meta/geo/geosite/ozon.list",
       "download_url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/ozon.list",
-      "modified": "2026-10-08T02:12:40Z",
+      "snapshot_on": "2026-10-13",
       "entries": 63,
+      "seed_sha256": "eef141f8d0c6b8720c7eecf66bb17eeba512e42ef6c1664ce3ab3ca46d29a2f0",
       "active_by_default": false,
+      "interval_seconds": 21600
+    },
+    "games": {
+      "url": "https://github.com/MetaCubeX/meta-rules-dat/blob/meta/geo/geosite/category-games.list",
+      "download_url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-games.list",
+      "snapshot_on": "2026-10-13",
+      "entries": 1123,
+      "seed_sha256": "649d946b135556222807013f4f802d80a1a20dee751651cddbdaae71071f9b14",
+      "active_by_default": true,
       "interval_seconds": 21600
     }
   }

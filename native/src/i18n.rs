@@ -33,6 +33,7 @@ impl Language {
 
 pub struct Locale {
     preference: Language,
+    pub design: crate::design::Design,
     system: Language,
     path: PathBuf,
 }
@@ -45,7 +46,7 @@ impl Locale {
             crate::setup::folder(CSIDL_LOCAL_APPDATA)?.join("Mukhomor")
         };
         let path = directory.join("ui-preferences.json");
-        let preference = std::fs::File::open(&path)
+        let value = std::fs::File::open(&path)
             .ok()
             .and_then(|file| {
                 let mut bytes = Vec::new();
@@ -54,14 +55,16 @@ impl Locale {
             })
             .filter(|bytes| bytes.len() <= 4096)
             .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-            .map(|value| match value["language"].as_str() {
-                Some("ru") => Language::Russian,
-                Some("en") => Language::English,
-                _ => Language::Auto,
-            })
-            .unwrap_or(Language::Auto);
+            .unwrap_or_default();
+        let preference = match value["language"].as_str() {
+            Some("ru") => Language::Russian,
+            Some("en") => Language::English,
+            _ => Language::Auto,
+        };
+        let design = crate::design::Design::read(&value["design"]);
         Ok(Self {
             preference,
+            design,
             system: system_language(unsafe { GetUserDefaultUILanguage() }),
             path,
         })
@@ -83,9 +86,24 @@ impl Locale {
         if self.preference == language {
             return Ok(());
         }
+        self.save(language, self.design)?;
+        self.preference = language;
+        Ok(())
+    }
+
+    pub fn set_design(&mut self, design: crate::design::Design) -> Result<(), String> {
+        if self.design == design {
+            return Ok(());
+        }
+        self.save(self.preference, design)?;
+        self.design = design;
+        Ok(())
+    }
+
+    fn save(&self, language: Language, design: crate::design::Design) -> Result<(), String> {
         static SERIAL: AtomicU64 = AtomicU64::new(0);
         let parent = self.path.parent().ok_or("No preference directory")?;
-        std::fs::create_dir_all(parent).map_err(|_| "Не удалось сохранить язык интерфейса")?;
+        std::fs::create_dir_all(parent).map_err(|_| "Не удалось сохранить настройки интерфейса")?;
         let temporary = parent.join(format!(
             "ui-preferences-{}-{}.tmp",
             std::process::id(),
@@ -96,11 +114,15 @@ impl Locale {
                 .write(true)
                 .create_new(true)
                 .open(&temporary)
-                .map_err(|_| "Не удалось сохранить язык интерфейса")?;
+                .map_err(|_| "Не удалось сохранить настройки интерфейса")?;
             output
-                .write_all(json!({"language":language.value()}).to_string().as_bytes())
+                .write_all(
+                    json!({"language":language.value(),"design":design.value()})
+                        .to_string()
+                        .as_bytes(),
+                )
                 .and_then(|_| output.sync_all())
-                .map_err(|_| "Не удалось сохранить язык интерфейса")?;
+                .map_err(|_| "Не удалось сохранить настройки интерфейса")?;
             drop(output);
             replace_preference(&temporary, &self.path)?;
             Ok(())
@@ -109,16 +131,20 @@ impl Locale {
             let _ = std::fs::remove_file(&temporary);
         }
         result?;
-        self.preference = language;
         Ok(())
     }
 
     pub fn text<'a>(&self, source: &'a str) -> Cow<'a, str> {
+        if let Some((russian, english)) = TEXT.iter().find(|(russian, _)| *russian == source) {
+            let translated = if self.effective() == Language::English {
+                *english
+            } else {
+                *russian
+            };
+            return Cow::Borrowed(translated);
+        }
         if self.effective() != Language::English {
             return Cow::Borrowed(source);
-        }
-        if let Some((_, english)) = TEXT.iter().find(|(russian, _)| *russian == source) {
-            return Cow::Borrowed(english);
         }
         if let Some(count) = source.strip_prefix("ТВОИ СЕРВЕРЫ · ") {
             return Cow::Owned(format!("YOUR SERVERS · {count}"));
@@ -137,13 +163,92 @@ impl Locale {
 
     /// Translate presentation only. The original errors and IPC payloads stay intact.
     pub fn error<'a>(&self, source: &'a str) -> Cow<'a, str> {
+        if source == "Invalid Mukhomor preset file" {
+            return Cow::Borrowed(if self.effective() == Language::English {
+                "Invalid Mukhomor preset file"
+            } else {
+                "Это не файл набора Mukhomor или он повреждён."
+            });
+        }
         if self.effective() != Language::English {
+            if let Some((_, russian)) = [
+                (
+                    "Settings exceed 2 MiB; reduce rule list size. Your draft has been kept.",
+                    "Общий размер настроек превышает 2 МиБ. Уменьши объём списков правил. Введённые данные сохранены в редакторе.",
+                ),
+                (
+                    "Empty rule or control character",
+                    "Правило пустое или содержит управляющие символы.",
+                ),
+                (
+                    "Expected an EXE name without a path",
+                    "Нужно имя программы с расширением .exe, без пути и запрещённых символов.",
+                ),
+                (
+                    "Expected an absolute EXE path",
+                    "Нужен полный путь к .exe, например C:\\Apps\\app.exe.",
+                ),
+                (
+                    "Unknown service source",
+                    "Неизвестный источник доменного списка.",
+                ),
+                (
+                    "Rule duplicates another active entry",
+                    "Правило повторяет другую включённую запись.",
+                ),
+                (
+                    "A direct domain rule has higher priority than this VPN exception",
+                    "Прямое доменное правило имеет приоритет выше этого исключения через VPN.",
+                ),
+                (
+                    "DNS seed must match an active domain exception",
+                    "Домен для обновления IP должен соответствовать включённому доменному правилу.",
+                ),
+                (
+                    "Preset name must contain 1-120 characters on one line",
+                    "Имя пресета должно содержать от 1 до 120 символов в одной строке.",
+                ),
+            ]
+            .iter()
+            .find(|(english, _)| *english == source)
+            {
+                return Cow::Borrowed(russian);
+            }
+            for (prefix, translation) in [
+                (
+                    "Expected a hostname without URL, port, or path: ",
+                    "Нужно имя домена без URL, порта или пути: ",
+                ),
+                ("Invalid domain: ", "Некорректный домен: "),
+                ("Invalid IP/CIDR: ", "Некорректный IP или CIDR: "),
+                ("Invalid IP: ", "Некорректный IP-адрес: "),
+                ("Invalid prefix: ", "Некорректная маска подсети: "),
+                ("Expected a full domain: ", "Нужно полное доменное имя: "),
+                (
+                    "Use the IP list for IP addresses: ",
+                    "Добавь IP-адрес в раздел IP / CIDR: ",
+                ),
+                (
+                    "Prefix would bypass all traffic or is invalid: ",
+                    "Некорректная маска или обход всего трафика: ",
+                ),
+            ] {
+                if let Some(value) = source.strip_prefix(prefix) {
+                    return Cow::Owned(format!("{translation}{value}"));
+                }
+            }
             if let Some(reason) = source.strip_prefix("Profile import: ")
                 && let Some(translated) = import_error_russian(reason)
             {
                 return Cow::Borrowed(translated);
             }
             match source {
+                "Choose a preset first" => {
+                    return Cow::Borrowed("Сначала выберите набор в списке.");
+                }
+                "Cannot add more than 128 presets" => {
+                    return Cow::Borrowed("Можно сохранить не более 128 наборов.");
+                }
                 "Import supports up to 128 servers and a library of up to 512 servers" => {
                     return Cow::Borrowed(
                         "Импорт: не более 128 серверов за один раз и 512 серверов в приложении.",
@@ -172,7 +277,7 @@ impl Locale {
                     "Проверка VPN не удалась ({phase}). Подключение отменено; подробности в runtime/logs/core.log."
                 ));
             }
-            return Cow::Borrowed(source);
+            return self.text(source);
         }
         if let Some(message) = source.strip_suffix(" · проверяем состояние") {
             return Cow::Owned(format!("{} · checking status", self.error(message)));
@@ -250,7 +355,7 @@ fn replace_preference(temporary: &Path, destination: &Path) -> Result<(), String
         };
         std::thread::sleep(std::time::Duration::from_millis(delay));
     }
-    Err("Не удалось сохранить язык интерфейса".into())
+    Err("Не удалось сохранить настройки интерфейса".into())
 }
 
 fn system_language(language_id: u16) -> Language {
@@ -262,6 +367,106 @@ fn system_language(language_id: u16) -> Language {
 }
 
 const TEXT: &[(&str, &str)] = &[
+    ("Оформление", "Appearance"),
+    ("Сбросить оформление", "Reset appearance"),
+    (
+        "Твой стиль. Твой размер. Без перезапуска.",
+        "Your style. Your size. No restart.",
+    ),
+    ("РАЗМЕР ИНТЕРФЕЙСА", "INTERFACE SIZE"),
+    (
+        "Меняются текст, иконки, кнопки и отступы.\nРазмер учитывает масштаб Windows.",
+        "Scales text, icons, buttons and spacing.\nWorks with your Windows display scale.",
+    ),
+    ("ПРЕСЕТ ДИЗАЙНА", "DESIGN PRESET"),
+    (
+        "Неон — основной: розовый + неон-teal.\nЛюбой пресет работает с любым размером.",
+        "Neon is the default: pink + neon teal.\nEvery preset works with any interface size.",
+    ),
+    ("ЭФФЕКТЫ", "EFFECTS"),
+    (
+        "Выбор сохраняется автоматически.",
+        "Your choice is saved automatically.",
+    ),
+    ("Неон", "Neon"),
+    ("Биопанк", "Biopunk"),
+    ("Классика", "Classic"),
+    ("Плазма", "Plasma"),
+    ("Киберпанк", "Cyberpunk"),
+    ("Реактор", "Reactor"),
+    ("Поп-арт", "Pop Art"),
+    ("Высокий ток", "Voltage"),
+    ("Токсик", "Toxic"),
+    ("Мятный огонь", "Mint Fire"),
+    ("Ультрафиолет", "Ultraviolet"),
+    ("Лазер", "Laser"),
+    ("Рейв-закат", "Rave Sunset"),
+    ("Вишнёвый лёд", "Cherry Ice"),
+    ("Глубина", "Deep Dive"),
+    ("Орхидея", "Orchid"),
+    ("Аркада", "Arcade"),
+    ("Кислота", "Acid"),
+    ("Голограмма", "Hologram"),
+    ("Дракон", "Dragon"),
+    ("Розовый + неон-teal", "Pink + neon teal"),
+    ("Электрозелёный + фуксия", "Electric green + fuchsia"),
+    ("Фиолетовый и бирюза", "Violet and teal"),
+    ("Оранжевый + электросиний", "Orange + electric blue"),
+    ("Cyan + красный", "Cyan + red"),
+    ("Фиолетовый + лайм", "Violet + lime"),
+    ("Фуксия + кобальт на белом", "Fuchsia + cobalt on white"),
+    ("Кобальт + неон-жёлтый", "Cobalt + neon yellow"),
+    ("Лайм + ультрафиолет", "Lime + ultraviolet"),
+    ("Мята + мандарин", "Mint + tangerine"),
+    ("Ультрафиолет + cyan", "Ultraviolet + cyan"),
+    ("Жёлтый + горячий розовый", "Yellow + hot pink"),
+    ("Мандарин + маджента", "Tangerine + magenta"),
+    ("Вишня + ледяная мята", "Cherry + ice mint"),
+    ("Лазурь + оранжевый", "Azure + orange"),
+    ("Маджента + кислотный лайм", "Magenta + acid lime"),
+    ("Электросиний + розовый", "Electric blue + pink"),
+    ("Лимон + cyan", "Lemon + cyan"),
+    ("Неон-мята + сиреневый", "Neon mint + lilac"),
+    ("Красный + электрожёлтый", "Red + electric yellow"),
+    ("Маленький", "Small"),
+    ("Средний", "Medium"),
+    ("Большой", "Large"),
+    (
+        "Windows отключила автозапуск Mukhomor. Включи Mukhomor в «Параметры Windows → Приложения → Автозагрузка».",
+        "Windows disabled Mukhomor startup. Enable Mukhomor in Windows Settings → Apps → Startup.",
+    ),
+    ("Запуск с Windows", "Start with Windows"),
+    ("Автоподключение VPN", "Auto-connect VPN"),
+    (
+        "При входе в Windows приложение запустится в трее.\nVPN подключится к последнему включённому серверу,\nесли включено автоподключение.",
+        "At Windows sign-in, the app starts in the tray.\nVPN connects to the last successfully connected server\nwhen auto-connect is enabled.",
+    ),
+    (
+        "Не удалось изменить запуск с Windows. Проверь доступ к настройкам Windows.",
+        "Could not change Windows startup. Check access to Windows settings.",
+    ),
+    (
+        "Запись автозапуска Mukhomor занята другой командой. Изменение отменено.",
+        "Another command uses the Mukhomor startup entry. The change was canceled.",
+    ),
+    (
+        "Путь Mukhomor слишком длинный для запуска с Windows.",
+        "The Mukhomor path exceeds the Windows startup limit.",
+    ),
+    (
+        "Не удалось запомнить последний подключённый сервер. Проверь доступ к данным Mukhomor.",
+        "Could not save the last connected server. Check access to Mukhomor data.",
+    ),
+    ("Закрыть", "Close"),
+    ("Показано предупреждений", "Warnings shown"),
+    (
+        "Исправь показанные записи и запусти проверку снова, чтобы увидеть следующие замечания.",
+        "Fix the shown entries and run the check again to see the remaining warnings.",
+    ),
+    (
+        "Не удалось открыть результаты проверки.",
+        "Could not open the rule check results.",
+    ),
     (
         "Приложение содержит недопустимые знаки или имеет недопустимую длину.",
         "The application path contains invalid characters or exceeds the Windows length limit.",
@@ -495,6 +700,9 @@ const TEXT: &[(&str, &str)] = &[
     ),
     ("Твой VPN. Твои привычки.", "Your VPN. Your preferences."),
     ("VPN подключён", "VPN connected"),
+    ("Подключаемся", "Connecting"),
+    ("Отключаем VPN", "Disconnecting"),
+    ("Ошибка подключения", "Connection failed"),
     ("Отключение", "Disconnecting"),
     ("Восстановление сети", "Network recovery"),
     ("VPN отключён", "VPN disconnected"),
@@ -686,10 +894,171 @@ const TEXT: &[(&str, &str)] = &[
     ("Сохранить", "Save"),
     ("Обновить списки и IP", "Update lists & IPs"),
     ("Сохранить настройки DNS", "Save DNS settings"),
+    ("Пресеты", "Presets"),
+    ("Новый пресет", "New preset"),
+    ("+ Новый", "+ New"),
+    ("Имя пресета", "Preset name"),
+    ("Описание", "Description"),
+    ("источники", "sources"),
+    ("Игры", "Games"),
+    ("Россия", "Russia"),
+    ("Поддомены", "Subdomains"),
+    (
+        "Домены, которые пойдут через VPN вопреки готовым спискам.",
+        "Domains that use the VPN even if found in service lists.",
+    ),
+    (
+        "IP или подсеть: 1.2.3.4, 1.2.3.0/24, 2001:db8::/32.",
+        "IP or subnet: 1.2.3.4, 1.2.3.0/24, 2001:db8::/32.",
+    ),
+    (
+        "example.com — с поддоменами. ru — вся зона .ru.",
+        "example.com includes subdomains. ru covers the .ru zone.",
+    ),
+    (
+        "Точный домен: api.example.com. Без https:// и пути.",
+        "Exact domain: api.example.com. No https:// or path.",
+    ),
+    (
+        "Полный путь к .exe. По одному правилу на строку.",
+        "Full path to .exe. One rule per line.",
+    ),
+    (
+        "Имя программы: cs2.exe. По одному правилу на строку.",
+        "App name: cs2.exe. One rule per line.",
+    ),
+    (
+        "Этот список выключен. Включите его в параметрах.",
+        "List disabled. Enable it in Options.",
+    ),
+    (
+        "Набор выключен. Включите его на странице «Наборы».",
+        "Preset disabled. Enable it on the Presets page.",
+    ),
+    (
+        "Пока нет наборов. Создайте свой или добавьте готовый.",
+        "No presets yet. Create one or add a template.",
+    ),
+    (
+        "Галочка включает набор. Правила редактируются отдельно.",
+        "Tick to enable a preset. Edit its rules on the Rules page.",
+    ),
+    (
+        "Создайте набор, включите его и настройте правила.",
+        "Create a preset, enable it, then edit its rules.",
+    ),
+    ("К настройкам", "Back to settings"),
+    ("Настройки DNS", "DNS settings"),
+    ("Экспорт набора", "Export preset"),
+    ("Импорт набора", "Import preset"),
+    ("Новое правило", "New rule"),
+    ("МОИ НАБОРЫ", "MY PRESETS"),
+    ("Название нового набора", "New preset name"),
+    ("+ Готовый", "+ Template"),
+    ("Экспорт", "Export"),
+    ("Импорт", "Import"),
+    ("Убрать", "Remove"),
+    ("Добавить", "Add"),
+    ("Создать", "Create"),
+    ("Правила", "Rules"),
+    ("Наборы", "Presets"),
+    ("Мои правила", "My rules"),
+    ("Новый набор", "New preset"),
+    ("Пустой набор", "Empty preset"),
+    ("+ Набор", "+ Preset"),
+    ("Параметры", "Options"),
+    ("К спискам", "Back to lists"),
+    ("Название набора", "Preset name"),
+    ("Набор включён", "Preset enabled"),
+    ("Список включён", "List enabled"),
+    ("Проверить", "Check"),
+    ("Наборы правил", "Rule presets"),
+    (
+        "Шесть типов правил. Свои списки и готовые наборы.",
+        "Six rule types. Personal lists and ready-made presets.",
+    ),
+    (
+        "Обновление доменных списков и IP-адресов",
+        "Update domain lists and IP addresses",
+    ),
+    (
+        "Мои правила хранятся отдельно от наборов.",
+        "My rules are stored separately from presets.",
+    ),
+    ("ОБНОВЛЯЕМЫЕ СПИСКИ ДОМЕНОВ", "UPDATABLE DOMAIN LISTS"),
+    (
+        "Набор выключен. Включить можно в параметрах.",
+        "Preset disabled. Enable it in Options.",
+    ),
+    (
+        "Этот список выключен. Текст сохранён.",
+        "This list is disabled. Its entries are kept.",
+    ),
+    ("Обновляемые списки", "Updatable lists"),
+    ("см. параметры", "see Options"),
+    ("По одному правилу на строку", "One rule per line"),
+    (
+        "Сохранить применит изменения во всех наборах.",
+        "Save applies changes to all presets and My rules.",
+    ),
+    (
+        "Удалить набор и все его правила? Изменение применится после сохранения.",
+        "Delete this preset and all its rules? The change takes effect when you save.",
+    ),
+    (
+        "Восстановить исходные правила и источники этого набора? Имя и настройки сохранятся.",
+        "Restore this preset's original rules and sources? Its name and preferences will be kept.",
+    ),
+    ("Пресет включён", "Preset enabled"),
+    ("Правила раздела включены", "Section rules enabled"),
+    ("Показать список", "Show list"),
+    ("Скрыть список", "Hide list"),
+    ("Настроить пресет", "Edit preset"),
+    ("Открыть правила", "Open rules"),
+    ("Восстановить правила", "Restore rules"),
+    ("ОБЫЧНЫЕ ПРАВИЛА", "STANDALONE RULES"),
+    ("ИСТОЧНИКИ ДОМЕНОВ", "DOMAIN SOURCES"),
+    ("ПОКАЗЫВАТЬ СПИСОК В РАЗДЕЛЕ", "SHOW LIST IN SECTION"),
+    (
+        "Видимость не влияет на работу правил.",
+        "Visibility does not affect routing.",
+    ),
+    ("Сбросить правила и пресеты", "Reset rules and presets"),
+    ("Проверить правила", "Check rules"),
+    ("Проверка правил", "Rule check"),
+    ("Проблем в правилах не обнаружено.", "No rule issues found."),
+    ("Предупреждения", "Warnings"),
+    ("Всего предупреждений", "Total warnings"),
+    ("выключен", "disabled"),
+    (
+        "Удалить пресет и все его правила?",
+        "Delete the preset and all its rules?",
+    ),
+    (
+        "Восстановить исходные правила и источники этого пресета? Имя и настройки сохранятся.",
+        "Restore this preset's original rules and sources? Its name and preferences will be kept.",
+    ),
+    (
+        "Сбросить правила и пресеты? Будут восстановлены базовые пресеты. Серверы и настройки подключения сохранятся.",
+        "Reset rules and presets to the bundled defaults? Servers and connection settings will be kept.",
+    ),
+    (
+        "Введённые данные не изменены. При сохранении VPN использует корректные правила. Предупреждения не меняют переключатели.",
+        "Your entries are unchanged. When saved, the VPN uses valid rules. Warnings do not change switches.",
+    ),
     ("Диагностика", "Diagnostics"),
     ("Открыть журналы", "Open logs"),
     ("Свернуть в трей", "Minimize to tray"),
+    ("МАРШРУТИЗАЦИЯ", "ROUTING"),
+    ("Весь трафик через VPN", "Route all traffic through VPN"),
+    ("Разрешить локальную сеть", "Allow local network"),
+    ("Сохранить маршрутизацию", "Save routing"),
+    (
+        "В полном режиме исключения приложений и сайтов не действуют.\nДля смены режима сначала отключите VPN.",
+        "Full mode disables app and website exceptions.\nDisconnect the VPN before changing modes.",
+    ),
     ("Российские сервисы", "Russian services"),
+    ("Игровые сервисы", "Gaming services"),
     ("Обновлять IP доменов", "Update domain IPs"),
     (
         "Учитывать замеченные поддомены",
@@ -698,14 +1067,23 @@ const TEXT: &[(&str, &str)] = &[
     ("Автоподключение", "Auto-connect"),
     ("ЯЗЫК ИНТЕРФЕЙСА", "INTERFACE LANGUAGE"),
     ("Язык интерфейса", "Interface language"),
+    ("ДИЗАЙН", "DESIGN"),
+    ("Визуальные улучшения", "Visual enhancements"),
+    ("Анимация фона", "Background animation"),
+    ("Скорость фона", "Background speed"),
+    ("Пиксельные скругления", "Pixel corners"),
+    (
+        "Спокойный переливающийся фон. Для старого ПК\nотключи улучшения — останется простой пиксельный интерфейс.",
+        "A gently flowing background. On an older PC, turn off\nenhancements to keep a simple pixel interface.",
+    ),
     ("По языку Windows", "Use Windows language"),
     ("Системный", "System"),
     ("Автоматически", "Automatic"),
     ("Авто", "Auto"),
     ("Русский", "Русский"),
     (
-        "Не удалось сохранить язык интерфейса",
-        "Could not save the interface language",
+        "Не удалось сохранить настройки интерфейса",
+        "Could not save interface preferences",
     ),
 ];
 
@@ -841,6 +1219,36 @@ fn import_error_russian(reason: &str) -> Option<&'static str> {
         "MASQUE h3-l4proxy does not support UDP." => {
             "Импорт: MASQUE h3-l4proxy не поддерживает UDP."
         }
+        "invalid Mycelium server hostname." => {
+            "Импорт: неверное имя или IP-адрес сервера Mycelium."
+        }
+        "Mycelium seed must contain exactly 32 bytes encoded as hexadecimal." => {
+            "Импорт: ключ seed Mycelium должен содержать ровно 64 шестнадцатеричных символа (32 байта)."
+        }
+        "Mycelium seed must not be all zero." => {
+            "Импорт: ключ seed Mycelium не может состоять только из нулей."
+        }
+        "invalid Mycelium TLS server identity." => {
+            "Импорт: имя сертификата Mycelium должно быть именем DNS или IP-адресом без квадратных скобок."
+        }
+        "Mycelium certificate fingerprint must be a SHA256 hexadecimal digest." => {
+            "Импорт: отпечаток сертификата Mycelium должен содержать SHA256 в виде 64 шестнадцатеричных символов или 32 пар через двоеточие."
+        }
+        "unsupported Mycelium TLS client fingerprint." => {
+            "Импорт: профиль TLS Mycelium не поддерживается. Выберите доступный профиль браузера."
+        }
+        "unsupported Mycelium transport." => {
+            "Импорт: транспорт Mycelium не поддерживается. Разрешены auto, h2 и websocket."
+        }
+        "unsupported Mycelium UDP transport." => {
+            "Импорт: транспорт UDP Mycelium не поддерживается. Разрешены auto, h3 и websocket."
+        }
+        "invalid Mycelium share-link credentials or endpoint." => {
+            "Импорт: в ссылке Mycelium неверно указан ключ seed, адрес или порт сервера."
+        }
+        "bracketed Mycelium endpoints must be IPv6 addresses." => {
+            "Импорт: в ссылке Mycelium квадратные скобки разрешены только для IPv6-адреса сервера."
+        }
         "expected Interface and one Peer." => {
             "Импорт: конфигурация WG должна содержать Interface и один Peer."
         }
@@ -954,6 +1362,7 @@ mod tests {
     #[test]
     fn manual_preference_and_dynamic_translation() {
         let mut locale = Locale {
+            design: crate::design::Design::default(),
             preference: Language::Auto,
             system: Language::English,
             path: PathBuf::new(),
@@ -971,6 +1380,7 @@ mod tests {
     #[test]
     fn every_public_parser_error_has_a_russian_display_without_changing_english() {
         let mut locale = Locale {
+            design: crate::design::Design::default(),
             preference: Language::Russian,
             system: Language::English,
             path: PathBuf::new(),
@@ -1004,6 +1414,7 @@ mod tests {
     #[test]
     fn generic_import_and_connection_errors_translate_without_changing_payload() {
         let mut locale = Locale {
+            design: crate::design::Design::default(),
             preference: Language::English,
             system: Language::Russian,
             path: PathBuf::new(),
@@ -1034,6 +1445,7 @@ mod tests {
     #[test]
     fn runtime_errors_are_display_only_and_keep_english_details() {
         let locale = Locale {
+            design: crate::design::Design::default(),
             preference: Language::English,
             system: Language::Russian,
             path: PathBuf::new(),
@@ -1067,6 +1479,7 @@ mod tests {
     #[test]
     fn unknown_backend_errors_keep_the_actual_cause_in_both_languages() {
         let mut locale = Locale {
+            design: crate::design::Design::default(),
             preference: Language::English,
             system: Language::Russian,
             path: PathBuf::new(),
@@ -1100,7 +1513,22 @@ mod tests {
         let result = || {
             let mut locale = Locale::new(&root, true).unwrap();
             assert_eq!(locale.language(), Language::Auto);
+            assert_eq!(locale.design, crate::design::Design::default());
+            let design = crate::design::Design {
+                effects: false,
+                animation: false,
+                animation_speed: 175,
+                rounding: false,
+                ..Default::default()
+            };
+            locale.set_design(design).unwrap();
+            assert_eq!(Locale::new(&root, true).unwrap().design, design);
             locale.set_language(Language::English).unwrap();
+            assert_eq!(
+                Locale::new(&root, true).unwrap().design,
+                design,
+                "changing language preserves design"
+            );
             assert_eq!(
                 Locale::new(&root, true).unwrap().language(),
                 Language::English
@@ -1114,6 +1542,18 @@ mod tests {
             assert_eq!(Locale::new(&root, true).unwrap().language(), Language::Auto);
             std::fs::write(&locale.path, b"broken JSON").unwrap();
             assert_eq!(Locale::new(&root, true).unwrap().language(), Language::Auto);
+            assert_eq!(
+                Locale::new(&root, true).unwrap().design,
+                crate::design::Design::default()
+            );
+            std::fs::write(&locale.path, br#"{"language":"ru"}"#).unwrap();
+            let migrated = Locale::new(&root, true).unwrap();
+            assert_eq!(migrated.language(), Language::Russian);
+            assert_eq!(
+                migrated.design,
+                crate::design::Design::default(),
+                "older preference files keep their language"
+            );
             std::fs::write(&locale.path, vec![b' '; 4097]).unwrap();
             assert_eq!(Locale::new(&root, true).unwrap().language(), Language::Auto);
             let files: Vec<_> = std::fs::read_dir(root.join("runtime")).unwrap().collect();

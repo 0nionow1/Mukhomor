@@ -31,7 +31,7 @@ jobs:
       - name: Fetch verified dependencies
         run: .\Fetch-Dependencies.ps1
       - name: Rust tests
-        run: cargo +stable test --manifest-path .\native\Cargo.toml --locked
+        run: cargo +stable test --manifest-path .\native\Cargo.toml --locked -- --test-threads=1
       - name: Build release packages
         run: .\Build-Release.ps1
       - name: Isolated application checks

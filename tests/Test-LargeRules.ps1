@@ -1,6 +1,7 @@
-﻿# Real rule matching and reloads in the pinned core, with loopback origins only.
+# Real rule matching and reloads in the pinned core, with loopback origins only.
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
+. (Join-Path $PSScriptRoot 'Set-OwnedTestRoot.ps1')
 $package=Split-Path -Parent $PSScriptRoot
 Import-Module (Join-Path $package 'SplitVpn.psm1') -Force -DisableNameChecking
 $fixture=Join-Path $PSScriptRoot ('large-rules-'+[guid]::NewGuid().ToString('N'))
@@ -30,8 +31,9 @@ function Apply($Config) {
 try {
     [IO.Directory]::CreateDirectory($fixture)|Out-Null
     Copy-Item -LiteralPath (Join-Path $package 'assets\settings.default.json') -Destination (Join-Path $fixture 'settings.json')
+    Set-OwnedTestRoot $fixture $fixture
     Initialize-SplitRoot $fixture
-    $settings=Get-SplitSettings $fixture
+    $settings=Get-SplitSettings $fixture; $settings.presets=@()
     $settings.ports.proxy=Free-Port;$settings.ports.controller=Free-Port;$settings.ports.dns=Free-Port
     $settings.dns_update.enabled=$true;$settings.dns_update.observe_subdomains=$false
     $settings.direct.domain_rule_sets=@('steam');$settings.direct.rule_set_exclusions=@('priority.test')

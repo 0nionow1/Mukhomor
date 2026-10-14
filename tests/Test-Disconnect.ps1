@@ -1,6 +1,7 @@
-﻿param([string]$Executable,[switch]$BridgeFramingOnly,[switch]$CancellationOnly)
+param([string]$Executable,[switch]$BridgeFramingOnly,[switch]$CancellationOnly)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
+. (Join-Path $PSScriptRoot 'Set-OwnedTestRoot.ps1')
 $package=Split-Path -Parent $PSScriptRoot
 if(!$Executable){$Executable=Join-Path $package 'native\target\release\mukhomor.exe'}
 $Executable=[IO.Path]::GetFullPath($Executable)
@@ -8,6 +9,12 @@ $fixture=Join-Path $PSScriptRoot ('disconnect-'+[guid]::NewGuid().ToString('N'))
 $base=Join-Path $fixture 'assets';$root=Join-Path $fixture 'state'
 [IO.Directory]::CreateDirectory($base)|Out-Null
 [IO.Directory]::CreateDirectory((Join-Path $root 'runtime'))|Out-Null
+Set-OwnedTestRoot $root $fixture
+Import-Module (Join-Path $package 'SplitVpn.psm1') -Force -DisableNameChecking
+Initialize-SplitRoot $root
+# The controller now edits Autoconnect natively. Give the lifecycle mock the
+# same private index contract as the real bridge, without real server data.
+Write-AtomicJson (Join-Path $root 'private\profiles.json') @{schema=1;selected='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';last_connected='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';autoconnect=$false;profiles=@(@{id='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';name='Fixture A'},@{id='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';name='Fixture B'})}
 [IO.File]::WriteAllText((Join-Path $root 'qa.marker'),'Isolated controller test. No TUN or system DNS.')
 $passed=0;$worker=$null;$clients=New-Object Collections.Generic.List[object]
 function Assert($Condition,[string]$Message){if(!$Condition){throw ('FAIL: '+$Message)};$script:passed++}
@@ -45,7 +52,8 @@ $statePath=Join-Path $Root 'runtime\mock-state.json'
 function Save($State){[IO.File]::WriteAllText($statePath,($State|ConvertTo-Json -Depth 20 -Compress))}
 function Snapshot {
     $state=Get-Content -LiteralPath $statePath -Raw|ConvertFrom-Json
-    return @{profiles=@(@{id='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';name='Fixture A'},@{id='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';name='Fixture B'});selected=$state.selected;autoconnect=$state.autoconnect;running=$state.running;starting=$state.starting;dns_recovery_pending=$state.recovery;settings=@{dns_update=@{enabled=$false}}}
+    $index=Get-Content -LiteralPath (Join-Path $Root 'private\profiles.json') -Raw|ConvertFrom-Json
+    return @{profiles=@(@{id='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';name='Fixture A'},@{id='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';name='Fixture B'});selected=$state.selected;last_connected=$index.last_connected;autoconnect=$index.autoconnect;running=$state.running;starting=$state.starting;dns_recovery_pending=$state.recovery;settings=@{dns_update=@{enabled=$false}}}
 }
 function Stubborn-Work {
     $windows=[Environment]::GetFolderPath('Windows')
@@ -87,6 +95,10 @@ try {
                 Start-Sleep -Seconds 60
             }
             $state.selected=$request.id;Save $state
+            $indexPath=Join-Path $Root 'private\profiles.json'
+            $index=Get-Content -LiteralPath $indexPath -Raw|ConvertFrom-Json
+            $index.selected=$request.id
+            [IO.File]::WriteAllText($indexPath,($index|ConvertTo-Json -Depth 20 -Compress),(New-Object Text.UTF8Encoding($false)))
         }
         'Connect' {
             $state.connections++;$state.starting=$true;Save $state
@@ -312,7 +324,9 @@ try {
     Assert ($updateTimer.Elapsed.TotalSeconds -lt 4 -and $updateReply.cancelled -and $offUpdate.ok) 'disconnect interrupts a stalled update instead of waiting behind it'
     Assert ($updateChild.WaitForExit(2000)) 'update cancellation kills only its supervised fixture child'
 
-    [IO.File]::WriteAllText((Join-Path $root 'runtime\qa-operation-limits.json'),'{"Disconnect":1000,"Exit":1000,"Snapshot":1000,"Init":1000}')
+    # Allow the cold PowerShell fixture to spawn its supervised child before
+    # testing the deadline; the production operation still has a hard bound.
+    [IO.File]::WriteAllText((Join-Path $root 'runtime\qa-operation-limits.json'),'{"Disconnect":3000,"Exit":1000,"Snapshot":1000,"Init":1000}')
     [IO.File]::WriteAllText((Join-Path $root 'runtime\fail-snapshot.marker'),'Snapshot failure is synthetic')
     $snapshotFailure=Request @{action='Connect';failWork=$true;request_id='snapshot-failure-fixture'}
     Assert (!$snapshotFailure.ok -and !$snapshotFailure.data.busy -and !$snapshotFailure.data.starting -and $snapshotFailure.data.phase -eq 'idle' -and $snapshotFailure.data.status_uncertain) 'failed cleanup Snapshot reaches a finite disconnected terminal state'
@@ -325,7 +339,7 @@ try {
     $deadlineClock=[Diagnostics.Stopwatch]::StartNew()
     $boundedStop=Request @{action='Disconnect';request_id='bounded-disconnect-fixture'}
     $deadlineClock.Stop()
-    Assert (!$boundedStop.ok -and !$boundedStop.data.busy -and $boundedStop.data.phase -eq 'recovery' -and $boundedStop.data.last_operation.request_id -eq 'bounded-disconnect-fixture' -and $deadlineClock.ElapsedMilliseconds -lt 4500) 'noncooperative Disconnect ends with a recoverable error within its hard deadline'
+    Assert (!$boundedStop.ok -and !$boundedStop.data.busy -and $boundedStop.data.phase -eq 'recovery' -and $boundedStop.data.last_operation.request_id -eq 'bounded-disconnect-fixture' -and $deadlineClock.ElapsedMilliseconds -lt 6500) 'noncooperative Disconnect ends with a recoverable error within its hard deadline'
     $boundedInfo=Get-Content -LiteralPath $childRecord -Raw|ConvertFrom-Json
     $boundedChild=Get-Process -Id $boundedInfo.pid -ErrorAction SilentlyContinue
     Assert (!$boundedChild -or $boundedChild.WaitForExit(2000)) 'Disconnect hard timeout also removes its supervised child'

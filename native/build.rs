@@ -4,6 +4,10 @@ use std::{
     process::Command,
 };
 
+#[allow(dead_code)]
+#[path = "src/mushroom.rs"]
+mod mushroom;
+
 fn color(source: &str, key: &str) -> u32 {
     let needle = format!("\"{key}\"");
     let tail = source
@@ -104,13 +108,13 @@ fn textures(out: &Path, source: &str, colors: &[u32]) {
     let background_strength = number(source, "texture_background_strength", 100, 100);
     let surface_strength = number(source, "texture_surface_strength", 28, 100);
     let seed = number(source, "texture_seed", 13371337, u32::MAX);
-    let grain = number(source, "texture_grain", 10, 12);
+    let grain = number(source, "texture_grain", 13, 16);
     let scale = number(source, "texture_flow_scale", 480, 1024);
     let warp = number(source, "texture_warp_strength", 200, 512);
     let octaves = number(source, "texture_octaves", 2, 6);
     let levels = number(source, "texture_levels", 16, 64);
     assert!(
-        (4..=12).contains(&grain) && scale >= 96 && octaves >= 1 && levels >= 8,
+        (4..=16).contains(&grain) && scale >= 96 && octaves >= 1 && levels >= 8,
         "Invalid texture flow settings"
     );
     let zinc_low = color(source, "texture_zinc_low");
@@ -149,8 +153,39 @@ fn textures(out: &Path, source: &str, colors: &[u32]) {
         }
     }
     fs::write(out.join("texture-field.bin"), &field).unwrap();
+    // Bake a seamless morph. Runtime controls speed and interpolates two tiny fields;
+    // there are no noise, trigonometry, or per-pixel floating point calculations.
+    let frames = 24;
+    let mut flow = Vec::with_capacity(field.len() * frames);
+    for frame in 0..frames {
+        let angle = frame as f64 * std::f64::consts::TAU / frames as f64;
+        let (dx, dy) = (angle.sin() * 0.32, (angle.cos() - 1.0) * 0.38);
+        for y in 0..height {
+            for x in 0..width {
+                let px = f64::from(x * grain) / f64::from(scale) + 3.17;
+                let py = f64::from(y * grain) / f64::from(scale) + 7.91;
+                let wx = fbm(px * 0.71 + dx, py * 0.71 + dy, seed ^ 0x6395dc21, octaves);
+                let wy = fbm(
+                    px * 0.71 + 13.7 - dy,
+                    py * 0.71 + 4.2 + dx,
+                    seed ^ 0x791dc553,
+                    octaves,
+                );
+                let value = fbm(
+                    px + dx + wx * f64::from(warp) / f64::from(scale),
+                    py + dy + wy * f64::from(warp) / f64::from(scale),
+                    seed,
+                    octaves,
+                );
+                let level = ((0.5 + value * 1.65).clamp(0.0, 1.0) * f64::from(levels - 1)).round();
+                flow.push((level * 255.0 / f64::from(levels - 1)).round() as u8);
+            }
+        }
+    }
+    assert_eq!(&flow[..field.len()], field.as_slice());
+    fs::write(out.join("texture-flow.bin"), flow).unwrap();
     let mut generated = format!(
-        "const CELL_GRAIN: i32 = {grain};\nconst FIELD_WIDTH: i32 = {width};\nconst FIELD_HEIGHT: i32 = {height};\n#[cfg(test)] const ZINC_CEILING: u8 = {zinc_ceiling};\nstatic FIELD: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/texture-field.bin\"));\nconst SURFACES: &[(u32, Palette)] = &[\n"
+        "const CELL_GRAIN: i32 = {grain};\nconst FIELD_WIDTH: i32 = {width};\nconst FIELD_HEIGHT: i32 = {height};\nconst FLOW_FRAMES: usize = {frames};\nstatic FLOW: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/texture-flow.bin\"));\n#[cfg(test)] const ZINC_CEILING: u8 = {zinc_ceiling};\nstatic FIELD: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/texture-field.bin\"));\nconst SURFACES: &[(u32, Palette)] = &[\n"
     );
     for index in [0usize, 1, 2, 6, 7] {
         let rgb = colors[index];
@@ -201,73 +236,12 @@ fn textures(out: &Path, source: &str, colors: &[u32]) {
     fs::write(out.join("texture_data.rs"), generated).unwrap();
 }
 fn icon(out: &Path, colors: &[u32]) {
-    // A deliberately crisp twelve-pixel mushroom. The same grid is painted in the UI.
-    let grid = [
-        "............",
-        "....IIII....",
-        "..IITTIIII..",
-        ".ITTIIITTTI.",
-        "ITTTIITTTTTI",
-        "ITTTTTTTIITI",
-        "IIIIIIIIIIII",
-        "....WWWW....",
-        "....WWWW....",
-        "...WWWWWW...",
-        "...WWWWWW...",
-        "............",
-    ];
-    // Distinct integer-scale images keep tray/taskbar pixels sharp. Windows
-    // selects its native size instead of shrinking a single 48px bitmap.
-    let sizes = [16usize, 24, 32, 48];
-    let mut images = Vec::new();
-    for size in sizes {
-        let scale = size / 12;
-        let offset = (size - scale * 12) / 2;
-        let mut pixels = vec![0u8; size * size * 4];
-        let mask_row = size.div_ceil(32) * 4;
-        let mut mask = vec![0u8; mask_row * size];
-        for y in 0..size {
-            for x in 0..size {
-                let glyph = if x >= offset
-                    && y >= offset
-                    && x < offset + scale * 12
-                    && y < offset + scale * 12
-                {
-                    grid[(y - offset) / scale].as_bytes()[(x - offset) / scale]
-                } else {
-                    b'.'
-                };
-                let (rgb, alpha) = match glyph {
-                    b'I' => (colors[6], 255),
-                    b'T' => (colors[5], 255),
-                    b'W' => (colors[9], 255),
-                    _ => (0, 0),
-                };
-                let i = ((size - y - 1) * size + x) * 4;
-                pixels[i..i + 4].copy_from_slice(&[
-                    (rgb & 255) as u8,
-                    (rgb >> 8 & 255) as u8,
-                    (rgb >> 16) as u8,
-                    alpha,
-                ]);
-                if alpha == 0 {
-                    mask[(size - y - 1) * mask_row + x / 8] |= 0x80 >> (x % 8);
-                }
-            }
-        }
-        let mut dib = Vec::new();
-        for value in [40u32, size as u32, (size * 2) as u32] {
-            dib.extend_from_slice(&value.to_le_bytes());
-        }
-        dib.extend_from_slice(&1u16.to_le_bytes());
-        dib.extend_from_slice(&32u16.to_le_bytes());
-        for value in [0u32, (pixels.len() + mask.len()) as u32, 0, 0, 0, 0] {
-            dib.extend_from_slice(&value.to_le_bytes());
-        }
-        dib.extend_from_slice(&pixels);
-        dib.extend_from_slice(&mask);
-        images.push(dib);
-    }
+    let palette = mushroom::palette(colors[0], colors[6], colors[5], colors[9], false);
+    let sizes = [16usize, 20, 24, 32, 40, 48, 64, 96, 128, 256];
+    let images: Vec<_> = sizes
+        .into_iter()
+        .map(|size| mushroom::icon_dib(size, &palette))
+        .collect();
     let mut ico = vec![0, 0, 1, 0, sizes.len() as u8, 0];
     let mut offset = 6 + sizes.len() * 16;
     for (size, dib) in sizes.into_iter().zip(&images) {
@@ -289,6 +263,7 @@ fn main() {
     let source = fs::read_to_string(root.join("../assets/theme.json"))
         .expect("assets/theme.json is required");
     println!("cargo:rerun-if-changed=../assets/theme.json");
+    println!("cargo:rerun-if-changed=src/mushroom.rs");
     let pairs = [
         ("BG", "background"),
         ("PANEL", "panel"),

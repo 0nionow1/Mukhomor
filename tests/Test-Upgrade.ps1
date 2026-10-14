@@ -16,7 +16,7 @@ foreach($name in @('Write-ManagedBytes','Set-AppEntries','Give-OwnerStartAccess'
 $transactions=@($ast.EndBlock.Statements | Where-Object {$_ -is [Management.Automation.Language.TryStatementAst] -and $_.Extent.Text -match '\$upgradeCommitted=\$true'})
 if($transactions.Count -ne 1){throw 'Installer transaction was not found'}
 $transaction=[scriptblock]::Create($transactions[0].Extent.Text)
-$allowed=@('Get-CimInstance','Get-Content','Invoke-CimMethod','sc.exe','Get-Process','Stop-Process','Join-Path','New-Service','Write-ManagedBytes','ConvertTo-Json','ConvertFrom-Json','Set-AppEntries','Give-OwnerStartAccess','Start-Service','Get-Service','Out-Null')
+$allowed=@('Get-CimInstance','Get-Content','Invoke-CimMethod','sc.exe','Get-Process','Stop-Process','Join-Path','New-Service','Write-ManagedBytes','ConvertTo-Json','ConvertFrom-Json','Set-AppEntries','Give-OwnerStartAccess','Start-Service','Get-Service','Out-Null','Update-AppStartupRegistration')
 foreach($command in $transactions[0].FindAll({param($node) $node -is [Management.Automation.Language.CommandAst]},$true)) {
     if($command.GetCommandName() -notin $allowed){throw ('Unmocked installer command: '+$command.GetCommandName())}
 }
@@ -27,6 +27,11 @@ function Assert($Condition,[string]$Message) {if(!$Condition){throw ('FAIL: '+$M
 $harness=New-Module -ArgumentList $functions -ScriptBlock {
     param($functions)
     foreach($name in $functions.Keys){. $functions[$name]}
+    function script:Update-AppStartupRegistration {
+        param($OwnerSid,$Program,$Executable)
+        if($OwnerSid -ne 'S-1-5-21-111-222-333-1001' -or !$Executable.StartsWith(($Program+'\'),[StringComparison]::OrdinalIgnoreCase) -or !$script:Model.path.StartsWith(('"'+$Executable+'" --service --root "'),[StringComparison]::Ordinal) -or $script:Model.service.Status -ne 'Running'){throw 'Startup registration changed before upgrade completion'}
+        $script:Model.events.Add('autostart-update')
+    }
     function script:Get-CimInstance {
         param($ClassName,$Filter)
         if($ClassName -ne 'Win32_Service' -or $Filter -ne "Name='Mukhomor'"){throw 'Unexpected CIM query'}
@@ -145,6 +150,7 @@ try {
     foreach($scenario in @('healthy','forced','foreign','entry_failure','rollback_failure','fresh','fresh_failure','queued_restart','start_failure')) {
         $result=& $harness {param($transaction,$fixture,$scenario) Invoke-UpgradeScenario $transaction $fixture $scenario} $transaction $fixture $scenario
         $model=$result.model
+        Assert (($model.events -contains 'autostart-update') -eq ($scenario -in @('healthy','forced','fresh','queued_restart'))) ($scenario+': startup registration updates only after a successful committed controller start')
         if($scenario -in @('healthy','forced','fresh','queued_restart')) {
             Assert (!$result.failure -and $result.committed -and $result.record.executable -eq $result.newExecutable -and $model.service.Status -eq 'Running') ($scenario+': complete verified upgrade starts the new controller')
             Assert ($model.shortcuts.Count -eq 2 -and @($model.shortcuts.Values|Where-Object {$_ -ne $result.newExecutable}).Count -eq 0 -and $model.properties.DisplayVersion -eq '1.2.3') ($scenario+': shortcuts and uninstall entries target the new release')
@@ -178,7 +184,7 @@ try {
         $afterSets=@($script:Model.events|Where-Object {$_ -eq 'sdset'}).Count
         [pscustomobject]@{owner=$owner;preserved=($preserved -and $after.ControlFlags -eq $before.ControlFlags);denyFirst=($after.DiscretionaryAcl[0].AceQualifier -eq [Security.AccessControl.AceQualifier]::AccessDenied);idempotent=($beforeSets -eq $afterSets)}
     }
-    Assert ($aclResult.owner.Count -eq 1 -and $aclResult.owner[0].AccessMask -eq 21 -and $aclResult.owner[0].AceQualifier -eq [Security.AccessControl.AceQualifier]::AccessAllowed) 'owner receives only query-config, query-status and start rights'
+    Assert ($aclResult.owner.Count -eq 1 -and $aclResult.owner[0].AccessMask -eq 131093 -and $aclResult.owner[0].AceQualifier -eq [Security.AccessControl.AceQualifier]::AccessAllowed) 'owner receives only READ_CONTROL, query-config, query-status and start rights'
     Assert ($aclResult.preserved -and $aclResult.denyFirst) 'service ACL retains existing deny, SYSTEM/admin permissions and protection flags'
     Assert $aclResult.idempotent 'repeated install does not append duplicate owner permissions'
     # Exercise the real retirement helper against two hidden windows owned by

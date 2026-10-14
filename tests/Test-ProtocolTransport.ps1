@@ -1,7 +1,8 @@
-﻿# Real, loopback-only protocol handshakes. No TUN, system DNS or service changes.
+# Real, loopback-only protocol handshakes. No TUN, system DNS or service changes.
 param([string]$Base)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
+. (Join-Path $PSScriptRoot 'Set-OwnedTestRoot.ps1')
 $package=if($Base){[IO.Path]::GetFullPath($Base)}else{Split-Path -Parent $PSScriptRoot}
 Import-Module (Join-Path $package 'SplitVpn.psm1') -Force -DisableNameChecking
 $fixture=Join-Path $PSScriptRoot ('protocol-'+[guid]::NewGuid().ToString('N'))
@@ -24,8 +25,9 @@ function New-FixtureRoot([string]$Name) {
     $path=Join-Path $fixture $Name
     [IO.Directory]::CreateDirectory($path)|Out-Null
     Copy-Item -LiteralPath (Join-Path $package 'assets\settings.default.json') -Destination (Join-Path $path 'settings.json')
+    Set-OwnedTestRoot $path $fixture
     Initialize-SplitRoot $path
-    $settings=Get-SplitSettings $path
+    $settings=Get-SplitSettings $path; $settings.presets=@()
     $settings.ports.proxy=Free-Port; $settings.ports.controller=Free-Port; $settings.ports.dns=Free-Port
     $settings.dns_update.enabled=$false; $settings.direct.domain_rule_sets=@(); $settings.direct.rule_set_exclusions=@()
     Write-AtomicJson (Join-Path $path 'settings.json') $settings

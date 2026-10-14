@@ -1,6 +1,7 @@
-﻿param([switch]$SkipCore)
+param([switch]$SkipCore)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
+. (Join-Path $PSScriptRoot 'Set-OwnedTestRoot.ps1')
 $package=Split-Path -Parent $PSScriptRoot
 Import-Module (Join-Path $package 'SplitVpn.psm1') -Force -DisableNameChecking
 $passed=0
@@ -13,6 +14,7 @@ $fixture=Join-Path $PSScriptRoot ('run-'+[guid]::NewGuid().ToString('N'))
 Copy-Item -LiteralPath (Join-Path $package 'assets\settings.default.json') -Destination (Join-Path $fixture 'settings.json')
 [IO.Directory]::CreateDirectory((Join-Path $fixture 'bin')) | Out-Null
 if (!$SkipCore) { Copy-Item -LiteralPath (Get-CorePath $package) -Destination (Join-Path $fixture 'bin\mihomo-windows-amd64-compatible.exe') }
+Set-OwnedTestRoot $fixture $fixture
 Initialize-SplitRoot $fixture
 $copySource=@{empty=@();single=@('8.8.8.8');nested=@(@{addresses=@('1.1.1.1')})}
 $copy=Convert-ToMap $copySource
@@ -22,9 +24,11 @@ Assert ($roundTrip.single -is [array] -and $roundTrip.single[0] -eq '8.8.8.8' -a
 $copy.single[0]='9.9.9.9'
 Assert ($copySource.single[0] -eq '8.8.8.8') 'normalization owns its copied scalar arrays'
 $s=Get-SplitSettings $fixture
+$defaultEffective=Get-EffectiveSplitSettings $s
 $s.dns_update.enabled=$true; $s.direct.domain_rule_sets=@(); $s.direct.rule_set_exclusions=@()
-Assert ($s.direct.process_names -contains 'qbittorrent.exe') 'qBittorrent preset'
-Assert ($s.direct.process_names -contains 'cs2.exe' -and $s.direct.process_names -contains 'TslGame.exe' -and $s.direct.process_names -contains 'dota2.exe') 'competitive game presets'
+Assert ($defaultEffective.direct.process_names -contains 'qbittorrent.exe') 'qBittorrent preset'
+Assert ($defaultEffective.direct.process_names -contains 'cs2.exe' -and $defaultEffective.direct.process_names -contains 'TslGame.exe' -and $defaultEffective.direct.process_names -contains 'dota2.exe') 'competitive game presets'
+$s.presets=@();$s.direct.domain_suffixes=@('ru','xn--p1ai')
 Assert ((Normalize-Domain '*.Example.COM.' -Suffix) -eq 'example.com') 'wildcard and case normalization'
 Assert ((Normalize-Domain 'xn--p1ai' -Suffix) -eq 'xn--p1ai') 'IDN suffix'
 Assert (Test-DirectDomain 'service.ru' $s) '.ru match'
@@ -130,8 +134,16 @@ if (!$SkipCore) {
     Set-SplitConfig $fixture $s $false
     $original=Get-Content -LiteralPath (Join-Path $fixture 'private\config.json') -Raw
     $bad=Get-SplitSettings $fixture; $bad.direct.domains=@('invalid,REJECT')
-    Assert-Throws { Set-SplitConfig $fixture $bad $false } 'invalid settings not applied'
-    Assert ((Get-Content -LiteralPath (Join-Path $fixture 'private\config.json') -Raw) -eq $original) 'failed apply preserves existing config'
+    $committedIssues=$null
+    $retained=Set-SplitConfig $fixture $bad $false -PassThru -RuleIssues ([ref]$committedIssues)
+    Assert ($retained.direct.domains -contains 'invalid,REJECT') 'diagnostic reuse preserves the original saved settings model'
+    Assert (@($committedIssues | Where-Object {$_.code -eq 'invalid_rule' -and $_.section -eq 'domains' -and $_.value -eq 'invalid,REJECT'}).Count -eq 1) 'committed projection reports the original invalid rule once'
+    $expectedIssues=Get-RuleSettingsIssues $bad
+    $keys={param($items) @($items | ForEach-Object {($_.preset_id,$_.section,$_.line,$_.code,$_.value) -join '|'}) -join "`n"}
+    Assert ((& $keys $committedIssues) -ceq (& $keys $expectedIssues)) 'reused diagnostics retain ownership, order and raw values'
+    Assert ((Get-SplitSettings $fixture).direct.domains -contains 'invalid,REJECT') 'invalid rule retained for correction'
+    Assert ((Get-RuleSettingsIssues $bad).Count -gt 0) 'advisory validator reports invalid rule'
+    Assert (!(Get-Content -LiteralPath (Join-Path $fixture 'private\config.json') -Raw).Contains('invalid,REJECT')) 'invalid rule is not emitted into core'
     Assert (!(@(Get-ChildItem -LiteralPath (Join-Path $fixture 'private') -Filter '*.tmp').Count)) 'atomic update leaves no temp files'
 }
 'PASS: '+$passed+' assertions; fixture '+$fixture

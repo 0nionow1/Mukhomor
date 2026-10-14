@@ -1,18 +1,29 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod appearance;
+mod autostart;
 mod backend;
+mod design;
 mod font;
 mod i18n;
+mod mushroom;
 mod platform;
+mod presets;
 mod service;
 mod setup;
 mod texture;
+mod traffic_guard;
+mod traffic_guard_cli;
+mod traffic_guard_tun;
 mod ui;
 use std::path::PathBuf;
+
+pub const APP_NAME: &str = "Mukhomor";
 
 fn argument(args: &[String], key: &str) -> Option<String> {
     args.windows(2).find(|a| a[0] == key).map(|a| a[1].clone())
 }
 fn main() {
+    let started = std::time::Instant::now();
     let args: Vec<String> = std::env::args().collect();
     let base = std::env::current_exe()
         .unwrap()
@@ -24,7 +35,9 @@ fn main() {
         .map(PathBuf::from)
         .unwrap_or_else(setup::data_root);
     let error_root = root.clone();
-    let result = if args.iter().any(|a| a == "--setup" || a == "--start") {
+    let result = if args.iter().any(|a| a == "--traffic-guard-action") {
+        traffic_guard_cli::run(&args, &base)
+    } else if args.iter().any(|a| a == "--setup" || a == "--start") {
         setup::install(
             &base,
             &argument(&args, "--owner").unwrap_or_default(),
@@ -51,14 +64,28 @@ fn main() {
             }
             Ok(())
         })
+    } else if args.iter().any(|a| a == "--qa-startup") {
+        if root.join("qa.marker").is_file() {
+            ui::run(base, root, false, started)
+        } else {
+            Err("Startup probe requires an isolated QA root".into())
+        }
     } else {
         let smoke = args.iter().any(|a| a == "--smoke");
         if smoke {
-            ui::run(base, root, true)
+            ui::run(base, root, true, started)
+        } else if args.iter().any(|a| a == "--startup") {
+            setup::ensure_startup_ready(&root).and_then(|ready| {
+                if ready {
+                    ui::run(base, root, false, started)
+                } else {
+                    Ok(())
+                }
+            })
         } else {
             setup::ensure_installed(&base, &root).and_then(|ready| {
                 if ready {
-                    ui::run(base, root, false)
+                    ui::run(base, root, false, started)
                 } else {
                     Ok(())
                 }
@@ -66,10 +93,22 @@ fn main() {
         }
     };
     if let Err(error) = result {
-        if args
-            .iter()
-            .any(|a| a == "--service" || a == "--worker" || a == "--rpc" || a == "--smoke")
-        {
+        if args.iter().any(|a| a == "--startup") {
+            if let Ok(folder) = setup::folder(windows_sys::Win32::UI::Shell::CSIDL_LOCAL_APPDATA) {
+                let logs = folder.join("Mukhomor");
+                let _ = std::fs::create_dir_all(&logs);
+                let _ = std::fs::write(logs.join("startup-error.log"), &error);
+            }
+            std::process::exit(1);
+        }
+        if args.iter().any(|a| {
+            a == "--service"
+                || a == "--worker"
+                || a == "--rpc"
+                || a == "--smoke"
+                || a == "--qa-startup"
+                || a == "--traffic-guard-action"
+        }) {
             if let Some(path) = argument(&args, "--output") {
                 let _ = std::fs::write(
                     path,

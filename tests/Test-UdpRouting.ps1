@@ -1,5 +1,6 @@
-﻿Set-StrictMode -Version Latest
+Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
+. (Join-Path $PSScriptRoot 'Set-OwnedTestRoot.ps1')
 $root=Split-Path -Parent $PSScriptRoot
 Import-Module (Join-Path $root 'SplitVpn.psm1') -Force -DisableNameChecking
 Import-Module (Join-Path $root 'SplitWindows.psm1') -Force -DisableNameChecking
@@ -9,14 +10,28 @@ $windowsModule=Get-Module SplitWindows
     function script:Get-NetAdapter { @() }
 }
 function Free-Port {
-    $l=New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback,0)
-    $l.Start(); $p=$l.LocalEndpoint.Port; $l.Stop(); return $p
+    # Windows can reserve a port for UDP while allowing TCP on the same number.
+    # The mixed proxy and DNS listeners need both, so probe both protocols.
+    for($attempt=0;$attempt -lt 100;$attempt++){
+        $l=New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback,0)
+        $u=New-Object Net.Sockets.UdpClient
+        try{
+            $l.Start();$p=$l.LocalEndpoint.Port
+            $u.ExclusiveAddressUse=$true
+            $u.Client.Bind((New-Object Net.IPEndPoint([Net.IPAddress]::Loopback,$p)))
+            return $p
+        }catch [Net.Sockets.SocketException]{
+            # Try another OS-selected candidate without changing host exclusions.
+        }finally{$u.Dispose();$l.Stop()}
+    }
+    throw 'Cannot find a free loopback TCP/UDP port'
 }
 $fixture=Join-Path $PSScriptRoot ('udp-'+[guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($fixture) | Out-Null
 Copy-Item -LiteralPath (Join-Path $root 'assets\settings.default.json') -Destination (Join-Path $fixture 'settings.json')
+Set-OwnedTestRoot $fixture $fixture
 Initialize-SplitRoot $fixture
-$s=Get-SplitSettings $fixture
+$s=Get-SplitSettings $fixture; $s.presets=@()
 $s.dns_update.enabled=$false; $s.direct.domain_rule_sets=@(); $s.direct.rule_set_exclusions=@()
 $s.direct.process_names=@('node.exe'); $s.direct.process_paths=@(); $s.direct.domains=@(); $s.direct.domain_suffixes=@('ru'); $s.direct.ip_cidrs=@()
 $s.ports.proxy=Free-Port; $s.ports.controller=Free-Port; $s.ports.dns=Free-Port

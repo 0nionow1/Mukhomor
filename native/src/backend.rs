@@ -1,4 +1,6 @@
 use crate::platform::{self, OwnedHandle, wide};
+#[path = "profile_store.rs"]
+mod profile_store;
 use serde_json::{Value, json};
 use std::{
     io::{BufRead, BufReader, Read, Write},
@@ -9,7 +11,7 @@ use std::{
     ptr::{null, null_mut},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc,
     },
     thread,
@@ -20,13 +22,15 @@ use windows_sys::Win32::{
     Security::Authorization::*,
     Security::*,
     Storage::FileSystem::*,
-    System::{IO::*, JobObjects::*, Pipes::*, Services::*, Threading::*},
+    System::{
+        IO::*, JobObjects::*, Pipes::*, Services::*, Threading::*, Time::FileTimeToSystemTime,
+    },
 };
 // A 512 KiB profile can expand sixfold when JSON escapes control characters.
 const MAX: usize = 4 * 1024 * 1024;
 const MAX_BRIDGE_FRAME: usize = MAX;
 const RPC_TIMEOUT: Duration = Duration::from_secs(100);
-const ACTIONS: [&str; 11] = [
+const ACTIONS: [&str; 12] = [
     "Import",
     "Select",
     "Rename",
@@ -36,10 +40,111 @@ const ACTIONS: [&str; 11] = [
     "Exit",
     "Autoconnect",
     "ApplySettings",
+    "ValidateSettings",
     "Update",
     "Diagnose",
 ];
 const CANCELLABLE_ACTIONS: [&str; 4] = ["Connect", "Select", "Update", "UpdateDns"];
+
+// Every mutable access invalidates the token, including error/recovery updates.
+// Unchanged polls never clone or serialize the potentially multi-MiB snapshot.
+struct Snapshot {
+    value: Value,
+    epoch: String,
+    revision: u64,
+}
+impl Snapshot {
+    fn new(value: Value) -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        Self {
+            value,
+            epoch: format!(
+                "{:x}-{:x}-{:x}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ),
+            revision: 0,
+        }
+    }
+    fn token(&self) -> String {
+        format!("{}-{:x}", self.epoch, self.revision)
+    }
+    fn response(&self, request: &Value) -> Value {
+        let revision = self.token();
+        if request["if_revision"].as_str() == Some(revision.as_str()) {
+            json!({"ok":true,"not_modified":true,"revision":revision})
+        } else {
+            json!({"ok":true,"revision":revision,"data":self.value})
+        }
+    }
+    fn replace(&mut self, value: Value) {
+        self.revision = self.revision.wrapping_add(1);
+        self.value = value;
+    }
+}
+impl std::ops::Deref for Snapshot {
+    type Target = Value;
+    fn deref(&self) -> &Value {
+        &self.value
+    }
+}
+impl std::ops::DerefMut for Snapshot {
+    fn deref_mut(&mut self) -> &mut Value {
+        self.revision = self.revision.wrapping_add(1);
+        &mut self.value
+    }
+}
+type SharedSnapshot = Arc<Mutex<Snapshot>>;
+
+fn bundled_core_path(base: &Path) -> PathBuf {
+    let bin = base.join("bin");
+    // The bridge verifies the manifest and executable hash before launching it.
+    // A broken experimental package fails closed instead of selecting stock core.
+    if bin.join("mycelium-build.json").is_file() {
+        bin.join("mihomo-mycelium.exe")
+    } else {
+        bin.join("mihomo-windows-amd64-compatible.exe")
+    }
+}
+
+fn format_creation_time(time: &SYSTEMTIME, ticks: u64) -> String {
+    // .NET's UTC round-trip format preserves all seven 100 ns fraction digits.
+    // SYSTEMTIME alone rounds that fraction to milliseconds.
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:07}Z",
+        time.wYear,
+        time.wMonth,
+        time.wDay,
+        time.wHour,
+        time.wMinute,
+        time.wSecond,
+        ticks % 10_000_000,
+    )
+}
+
+fn creation_time_utc(creation: &FILETIME) -> Option<String> {
+    let mut time: SYSTEMTIME = unsafe { std::mem::zeroed() };
+    if unsafe { FileTimeToSystemTime(creation, &mut time) } == 0 || time.wYear > 9999 {
+        return None;
+    }
+    let ticks = (u64::from(creation.dwHighDateTime) << 32) | u64::from(creation.dwLowDateTime);
+    Some(format_creation_time(&time, ticks))
+}
+
+fn process_creation_time(handle: HANDLE) -> Option<String> {
+    let mut creation: FILETIME = unsafe { std::mem::zeroed() };
+    let mut exit: FILETIME = unsafe { std::mem::zeroed() };
+    let mut kernel: FILETIME = unsafe { std::mem::zeroed() };
+    let mut user: FILETIME = unsafe { std::mem::zeroed() };
+    if unsafe { GetProcessTimes(handle, &mut creation, &mut exit, &mut kernel, &mut user) } == 0 {
+        return None;
+    }
+    creation_time_utc(&creation)
+}
 
 fn read_bridge_frame(reader: impl Read) -> Result<Vec<u8>, String> {
     // A persistent engine may inherit an otherwise unused stdout writer.
@@ -141,28 +246,6 @@ fn installed_service_status(
         }
         Ok(status)
     }
-}
-fn clean_runtime(root: &Path, status: &SERVICE_STATUS_PROCESS) -> bool {
-    let absent = |path: &Path| {
-        std::fs::symlink_metadata(path)
-            .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
-    };
-    status.dwCurrentState == SERVICE_STOPPED
-        && status.dwProcessId == 0
-        && absent(&root.join("runtime/session.json"))
-        && absent(&root.join("runtime/dns-backup.json"))
-        && read_intent(root)
-            .ok()
-            .flatten()
-            .is_some_and(|intent| !intent.desired)
-}
-pub fn stopped_clean(root: &Path) -> bool {
-    // A lost Exit receipt may arrive after the controller has already stopped.
-    // Confirm only our protected registration and recovered runtime. Missing
-    // permissions or damaged intent are never proof of a clean shutdown.
-    crate::setup::installed(root)
-        .and_then(|executable| installed_service_status(root, &executable))
-        .is_ok_and(|status| clean_runtime(root, &status))
 }
 fn pipe_name(root: &Path) -> String {
     let mut hash = 0xcbf29ce484222325u64;
@@ -342,19 +425,26 @@ struct ConnectionIntent {
 }
 fn read_intent(root: &Path) -> Result<Option<ConnectionIntent>, String> {
     let path = root.join("runtime/connection-intent.json");
-    let bytes =
-        match std::fs::read(path) {
-            Ok(bytes) => bytes,
+    let file =
+        match std::fs::File::open(path) {
+            Ok(file) => file,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(_) => return Err(
                 "Не удалось прочитать состояние подключения; автоматическое подключение отменено"
                     .into(),
             ),
         };
-    let data: Value = serde_json::from_slice(&bytes).map_err(|_| {
+    let mut bytes = Vec::new();
+    file.take(4097)
+        .read_to_end(&mut bytes)
+        .map_err(|_| "Не удалось прочитать состояние подключения")?;
+    if bytes.len() > 4096 {
+        return Err("Повреждено состояние подключения; автоматическое подключение отменено".into());
+    }
+    let data: Value = crate::traffic_guard_cli::parse(&bytes).map_err(|_| {
         "Повреждено состояние подключения; автоматическое подключение отменено".to_string()
     })?;
-    if data["schema"] != 1 {
+    if data["schema"] != 1 || data.as_object().is_none_or(|object| object.len() != 3) {
         return Err(
             "Неизвестный формат состояния подключения; автоматическое подключение отменено".into(),
         );
@@ -375,6 +465,11 @@ fn save_intent(root: &Path, intent: &ConnectionIntent) -> Result<(), String> {
         &json!({"schema":1,"generation":intent.generation,"desired":intent.desired}),
     )
     .map_err(|e| e.to_string())?;
+    write_atomic_state(&path, &pending, &bytes).map_err(|_| {
+        "Не удалось сохранить состояние подключения. Проверь доступ к данным Mukhomor.".to_string()
+    })
+}
+fn write_atomic_state(path: &Path, pending: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let result = (|| {
         // The containing runtime directory is protected by the installer.
         // A stale temporary file is not connection state and can be discarded.
@@ -399,11 +494,161 @@ fn save_intent(root: &Path, intent: &ConnectionIntent) -> Result<(), String> {
         Ok(())
     })();
     let _ = std::fs::remove_file(&pending);
-    result.map_err(|_| {
-        "Не удалось сохранить состояние подключения. Проверь доступ к данным Mukhomor.".to_string()
-    })
+    result
+}
+
+fn startup_target(data: &Value) -> Option<&str> {
+    let id = data
+        .get("last_connected")
+        .unwrap_or(&data["selected"])
+        .as_str()?;
+    data["profiles"]
+        .as_array()?
+        .iter()
+        .any(|p| p["id"] == id)
+        .then_some(id)
+        .filter(|id| !id.is_empty())
+}
+fn remember_connection(
+    root: &Path,
+    data: &mut Value,
+    current: &ConnectionIntent,
+    generation: u64,
+) -> Result<(), String> {
+    if !current.desired || current.generation != generation || data["running"] != true {
+        return Ok(());
+    }
+    let error =
+        "Не удалось запомнить последний подключённый сервер. Проверь доступ к данным Mukhomor.";
+    let id = data["selected"]
+        .as_str()
+        .filter(|s| s.len() == 32 && s.bytes().all(|b| b.is_ascii_hexdigit()))
+        .ok_or(error)?;
+    let path = root.join("private/profiles.json");
+    let bytes = std::fs::read(&path).map_err(|_| error)?;
+    if bytes.len() > 524288 {
+        return Err(error.into());
+    }
+    let mut index: Value = serde_json::from_slice(&bytes).map_err(|_| error)?;
+    if index["schema"] != 1
+        || index["selected"] != id
+        || !index["profiles"]
+            .as_array()
+            .is_some_and(|profiles| profiles.iter().any(|p| p["id"] == id))
+    {
+        return Err(error.into());
+    }
+    if index["last_connected"] != id {
+        index["last_connected"] = json!(id);
+        let bytes = serde_json::to_vec(&index).map_err(|_| error)?;
+        write_atomic_state(&path, &root.join("private/profiles.json.pending"), &bytes)
+            .map_err(|_| error)?;
+    }
+    data["last_connected"] = json!(id);
+    Ok(())
+}
+fn allow_login_connect(data: &Value, current: &ConnectionIntent, available: &mut bool) -> bool {
+    let once = std::mem::replace(available, false);
+    once && !current.desired
+        && data["autoconnect"] == true
+        && startup_target(data).is_some()
+        && data["service_ready"] == true
+        && data["busy"] != true
+        && data["running"] != true
+        && data["starting"] != true
+        && data["phase"] == "idle"
+        && data["status_uncertain"] != true
+        && data["shutting_down"] != true
+        && (data["last_error"].is_null() || data["last_error"].as_str() == Some(""))
+}
+fn persist_startup_intent(
+    root: &Path,
+    intent: &mut ConnectionIntent,
+    initial: &mut Value,
+    cleanup_only: bool,
+) -> Result<(), String> {
+    if let Err(error) = save_intent(root, intent) {
+        intent.desired = false;
+        if cleanup_only {
+            // No listener/readiness or explicit guard release with stale disk
+            // reconnect intent. The recovery service stops without SCM retry.
+            return Err(error);
+        }
+        initial["last_error"] = json!(error);
+    }
+    Ok(())
+}
+fn finish_startup_intent(
+    root: &Path,
+    intent: &mut ConnectionIntent,
+    initial: &mut Value,
+    cleanup_only: bool,
+    cancellation: Option<crate::setup::cleanup_request::Pending>,
+) -> Result<(), String> {
+    persist_startup_intent(
+        root,
+        intent,
+        initial,
+        cleanup_only || cancellation.is_some(),
+    )?;
+    if let Some(cancellation) = cancellation {
+        // A crash before this point retains the durable request. A crash after
+        // it leaves durable desired=false. Boot autoconnect never skips it.
+        cancellation.consume()?;
+    }
+    Ok(())
+}
+fn permit_connect(root: &Path) -> Result<(), String> {
+    match crate::setup::cleanup_request::pending(root)? {
+        None => Ok(()),
+        Some(_) => Err("CLEANUP_REQUEST_PENDING".into()),
+    }
+}
+fn consume_cancellation(root: &Path) -> Result<(), String> {
+    if let Some(cancellation) = crate::setup::cleanup_request::pending(root)? {
+        cancellation.consume()?;
+    }
+    Ok(())
+}
+fn admit_connection_intent(
+    root: &Path,
+    intent: &mut ConnectionIntent,
+    action: &str,
+) -> Result<(), String> {
+    if !["Connect", "Disconnect", "Exit"].contains(&action) {
+        return Err("Invalid connection intent action".into());
+    }
+    intent.generation = intent.generation.wrapping_add(1);
+    let cancel_error = if action == "Connect" {
+        permit_connect(root).err()
+    } else {
+        None
+    };
+    intent.desired = action == "Connect" && cancel_error.is_none();
+    if let Err(error) = save_intent(root, intent) {
+        intent.desired = false;
+        return Err(error);
+    }
+    if let Some(error) = cancel_error {
+        return Err(error);
+    }
+    if ["Disconnect", "Exit"].contains(&action) {
+        // Only the confirmed durable false intent can consume cancellation.
+        // Read/delete errors leave it pending and prohibit terminal success.
+        consume_cancellation(root)?;
+    }
+    Ok(())
 }
 fn decorate(data: &mut Value, intent: &ConnectionIntent, operation: &str) {
+    // Verified WFP rules alone do not prove an active VPN. A stale or orphaned
+    // adapter may remain after the owned core has stopped or during recovery.
+    if data["traffic_guard"]["protected"] == true
+        && (data["running"] != true || data["starting"] == true)
+    {
+        data["traffic_guard"]["protected"] = json!(false);
+        data["traffic_guard"]["recovery_pending"] =
+            json!(data["traffic_guard"]["configured"] == true);
+    }
     data["service_ready"] = json!(true);
     data["operation"] = json!(operation);
     data["busy"] = json!(!operation.is_empty());
@@ -414,6 +659,10 @@ fn decorate(data: &mut Value, intent: &ConnectionIntent, operation: &str) {
             || data["starting"] == true
         {
             "connecting"
+        } else if data["traffic_guard"]["configured"] == true
+            && data["traffic_guard"]["protected"] != true
+        {
+            "recovery"
         } else if data["running"] == true {
             "connected"
         } else if data["dns_recovery_pending"] == true {
@@ -426,16 +675,18 @@ fn decorate(data: &mut Value, intent: &ConnectionIntent, operation: &str) {
         data["running"] == true
             || data["starting"] == true
             || data["dns_recovery_pending"] == true
+            || data["traffic_guard"]["configured"] == true
             || (intent.desired && ["Connect", "Select"].contains(&operation))
     );
 }
 fn listener(
     root: PathBuf,
-    cache: Arc<Mutex<Value>>,
+    cache: SharedSnapshot,
     intent: Arc<Mutex<ConnectionIntent>>,
     tx: mpsc::Sender<Request>,
     signals: (isize, isize, isize),
     counter: Arc<AtomicU64>,
+    login_available: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let (_, stop, _) = signals;
     let owner = std::fs::read_to_string(root.join("owner.sid")).unwrap_or(platform::user_sid()?);
@@ -503,8 +754,20 @@ fn listener(
             let intent = intent.clone();
             let tx = tx.clone();
             let counter = counter.clone();
+            let login_available = login_available.clone();
             thread::spawn(move || {
-                if serve_client(handle, root, cache, intent, tx, signals, counter).is_err() {
+                if serve_client(
+                    handle,
+                    root,
+                    cache,
+                    intent,
+                    tx,
+                    signals,
+                    counter,
+                    login_available,
+                )
+                .is_err()
+                {
                     platform::signal(stop);
                 }
             });
@@ -556,11 +819,12 @@ fn accept(handle: HANDLE, stop: isize) -> Result<bool, String> {
 fn serve_client(
     handle: OwnedHandle,
     root: PathBuf,
-    cache: Arc<Mutex<Value>>,
+    cache: SharedSnapshot,
     intent: Arc<Mutex<ConnectionIntent>>,
     tx: mpsc::Sender<Request>,
     signals: (isize, isize, isize),
     counter: Arc<AtomicU64>,
+    login_available: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let (wake, stop, cancel) = signals;
     unsafe {
@@ -568,17 +832,18 @@ fn serve_client(
             if !accept(handle.0, stop)? {
                 break;
             }
-            if let Ok(value) = receive(handle.0, Instant::now() + Duration::from_secs(5)) {
+            if let Ok(mut value) = receive(handle.0, Instant::now() + Duration::from_secs(5)) {
                 let exiting = value["action"] == "Exit";
                 let response = if value["action"] == "Status" {
-                    json!({"ok":true,"data":cache.lock().unwrap().clone()})
+                    cache.lock().unwrap().response(&value)
                 } else if value["action"] == "ShutdownWorker" && root.join("qa.marker").exists() {
                     platform::signal(stop);
                     json!({"ok":true})
                 } else if !ACTIONS.contains(&value["action"].as_str().unwrap_or("")) {
                     json!({"ok":false,"error":"Неизвестная операция","data":cache.lock().unwrap().clone()})
                 } else {
-                    let action = value["action"].as_str().unwrap_or("");
+                    let action_name = value["action"].as_str().unwrap_or("").to_owned();
+                    let action = action_name.as_str();
                     let request_id = value["request_id"]
                         .as_str()
                         .filter(|x| x.len() <= 96 && x.chars().all(|x| !x.is_control()))
@@ -589,6 +854,28 @@ fn serve_client(
                     // burst of repeated Connects from outliving the RPC limit.
                     let mut current = intent.lock().unwrap();
                     let mut data = cache.lock().unwrap();
+                    if action == "Connect" && value["startup"] == true {
+                        let mut available = login_available.swap(false, Ordering::Relaxed);
+                        let allowed = allow_login_connect(&data, &current, &mut available)
+                            && crate::setup::cleanup_request::pending(&root)
+                                .is_ok_and(|pending| pending.is_none());
+                        if !allowed {
+                            let response =
+                                json!({"ok":true,"request_id":request_id,"data":data.clone()});
+                            drop(data);
+                            drop(current);
+                            let _ =
+                                send(handle.0, &response, Instant::now() + Duration::from_secs(5));
+                            let _ = read_bytes(
+                                handle.0,
+                                &mut [0],
+                                Instant::now() + Duration::from_secs(2),
+                            );
+                            DisconnectNamedPipe(handle.0);
+                            continue;
+                        }
+                        value["id"] = json!(startup_target(&data));
+                    }
                     if data["shutting_down"] == true
                         || (data["busy"] == true && !["Disconnect", "Exit"].contains(&action))
                         || data["operation"] == "Exit"
@@ -603,19 +890,20 @@ fn serve_client(
                         continue;
                     }
                     let id = counter.fetch_add(1, Ordering::Relaxed) + 1;
+                    if ["Connect", "Disconnect", "Exit", "Select"].contains(&action) {
+                        login_available.store(false, Ordering::Relaxed);
+                    }
                     let mut generation = None;
                     let mut persistence_error = None;
                     if ["Connect", "Disconnect", "Exit", "Select", "Update"].contains(&action) {
-                        if ["Connect", "Disconnect", "Exit"].contains(&action) {
-                            current.generation = current.generation.wrapping_add(1);
-                            current.desired = action == "Connect";
-                            if let Err(error) = save_intent(&root, &current) {
-                                // An unsaved Connect is rejected. Disconnect
-                                // still cleans up the tunnel and reports the
-                                // persistence error instead of claiming success.
-                                current.desired = false;
-                                persistence_error = Some(error);
-                            }
+                        if ["Connect", "Disconnect", "Exit"].contains(&action)
+                            && let Err(error) = admit_connection_intent(&root, &mut current, action)
+                        {
+                            // An unsaved Connect is rejected. Disconnect
+                            // still cleans up the tunnel and reports the
+                            // persistence error instead of claiming success.
+                            current.desired = false;
+                            persistence_error = Some(error);
                         }
                         generation = Some(current.generation);
                         if ["Disconnect", "Exit"].contains(&action) {
@@ -704,9 +992,9 @@ impl Bridge {
     }
     fn limit(&self, action: &str) -> Duration {
         let seconds = match action {
-            "Connect" | "Select" | "Import" | "ApplySettings" => 60,
+            "Connect" | "Select" | "Import" | "ApplySettings" | "ValidateSettings" => 60,
             "Init" => 60,
-            "Disconnect" | "Exit" => 20,
+            "Disconnect" | "Exit" | "Recover" => 20,
             "Snapshot" => 15,
             "Update" | "UpdateDns" => 25,
             _ => 30,
@@ -741,17 +1029,18 @@ impl Bridge {
         let mut child = Command::new(
             PathBuf::from(system).join("System32/WindowsPowerShell/v1.0/powershell.exe"),
         )
-        .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"])
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+        ])
         .arg(script)
         .arg("-Root")
         .arg(&self.root)
         .env("MUKHOMOR_ASSETS", &self.base)
-        .env(
-            "MUKHOMOR_CORE_PATH",
-            self.base
-                .join("bin")
-                .join("mihomo-windows-amd64-compatible.exe"),
-        )
+        .env("MUKHOMOR_CORE_PATH", bundled_core_path(&self.base))
         .creation_flags(CREATE_NO_WINDOW)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -852,7 +1141,7 @@ impl Bridge {
     fn core(&self) -> Option<OwnedHandle> {
         let bytes = std::fs::read(self.root.join("runtime/session.json")).ok()?;
         let session: Value = serde_json::from_slice(&bytes).ok()?;
-        let pid = session["pid"].as_u64()? as u32;
+        let pid = u32::try_from(session["pid"].as_u64()?).ok()?;
         unsafe {
             let handle = OwnedHandle(OpenProcess(
                 SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
@@ -862,22 +1151,31 @@ impl Bridge {
             if handle.0.is_null() {
                 return None;
             }
+            if process_creation_time(handle.0)?.as_str() != session["started"].as_str()? {
+                return None;
+            }
             let mut buffer = vec![0u16; 32768];
             let mut length = buffer.len() as u32;
             if QueryFullProcessImageNameW(handle.0, 0, buffer.as_mut_ptr(), &mut length) == 0 {
                 return None;
             }
             let actual = PathBuf::from(String::from_utf16_lossy(&buffer[..length as usize]));
-            let expected = self
-                .base
-                .join("bin")
-                .join("mihomo-windows-amd64-compatible.exe");
-            if actual.canonicalize().ok()?.to_string_lossy().to_lowercase()
-                != expected
-                    .canonicalize()
-                    .ok()?
-                    .to_string_lossy()
-                    .to_lowercase()
+            let bin = self.base.join("bin");
+            let allowed = [
+                bin.join("mihomo-windows-amd64-compatible.exe"),
+                bin.join("mihomo-mycelium.exe"),
+            ];
+            // QueryFullProcessImageName supplies the running image path even
+            // when the current package has changed; don't require the file to exist.
+            let actual_text = actual.to_string_lossy().to_lowercase();
+            if !allowed
+                .iter()
+                .any(|path| path.to_string_lossy().to_lowercase() == actual_text)
+            {
+                return None;
+            }
+            if let Some(recorded) = session.get("core_path")
+                && recorded.as_str()?.to_lowercase() != actual_text
             {
                 return None;
             }
@@ -885,7 +1183,7 @@ impl Bridge {
         }
     }
 }
-fn cached_snapshot(bridge: &Bridge, cache: &Arc<Mutex<Value>>) -> Value {
+fn cached_snapshot(bridge: &Bridge, cache: &SharedSnapshot) -> Value {
     match bridge.call(&json!({"action":"Snapshot"})) {
         Ok(data) => data,
         Err(_) => {
@@ -898,12 +1196,15 @@ fn cached_snapshot(bridge: &Bridge, cache: &Arc<Mutex<Value>>) -> Value {
             data["dns_recovery_pending"] =
                 json!(!running && bridge.root.join("runtime/dns-backup.json").exists());
             data["status_uncertain"] = json!(true);
+            let configured = data["traffic_guard"]["configured"] == true
+                || bridge.root.join("private/traffic-guard-plan.json").exists();
+            data["traffic_guard"] = json!({"configured":configured,"verified":false,"protected":false,"recovery_pending":configured});
             data
         }
     }
 }
 fn complete(
-    cache: &Arc<Mutex<Value>>,
+    cache: &SharedSnapshot,
     intent: &Arc<Mutex<ConnectionIntent>>,
     request: &Request,
     mut snapshot: Value,
@@ -911,6 +1212,10 @@ fn complete(
 ) -> Value {
     let current = intent.lock().unwrap();
     let mut data = cache.lock().unwrap();
+    if snapshot.get("rule_issues").is_none() && snapshot["settings"] == data["settings"] {
+        snapshot["rule_issues"] = data["rule_issues"].clone();
+        snapshot["rule_issues_total"] = data["rule_issues_total"].clone();
+    }
     let newer = data["operation_id"].as_u64().unwrap_or(0) > request.id;
     let pending = if newer {
         data["operation"].as_str().unwrap_or("").to_owned()
@@ -963,16 +1268,20 @@ fn complete(
     if request.value["action"] == "Exit" && result.is_ok() {
         snapshot["shutting_down"] = json!(true);
     }
-    *data = snapshot.clone();
+    data.replace(snapshot.clone());
     json!({"ok":result.is_ok(),"error":error,"cancelled":cancelled,"request_id":request.request_id,"operation_id":request.id,"data":snapshot})
 }
 fn background_snapshot(
-    cache: &Arc<Mutex<Value>>,
+    cache: &SharedSnapshot,
     intent: &Arc<Mutex<ConnectionIntent>>,
     mut snapshot: Value,
 ) {
     let current = intent.lock().unwrap();
     let mut data = cache.lock().unwrap();
+    if snapshot.get("rule_issues").is_none() && snapshot["settings"] == data["settings"] {
+        snapshot["rule_issues"] = data["rule_issues"].clone();
+        snapshot["rule_issues_total"] = data["rule_issues_total"].clone();
+    }
     let pending = data["operation_id"].as_u64().unwrap_or(0)
         > data["completed_operation_id"].as_u64().unwrap_or(0);
     let operation = if pending {
@@ -990,19 +1299,20 @@ fn background_snapshot(
     ] {
         snapshot[key] = data[key].clone();
     }
-    *data = snapshot;
+    data.replace(snapshot);
 }
 fn startup_snapshot(bridge: &Bridge) -> Value {
     let index = std::fs::read(bridge.root.join("private/profiles.json"))
         .ok()
         .and_then(|x| serde_json::from_slice::<Value>(&x).ok())
         .unwrap_or(json!({"profiles":[],"selected":"","autoconnect":false}));
-    let settings = std::fs::read(bridge.root.join("settings.json"))
+    let mut settings = std::fs::read(bridge.root.join("settings.json"))
         .or_else(|_| std::fs::read(bridge.base.join("assets/settings.default.json")))
         .ok()
         .and_then(|x| serde_json::from_slice::<Value>(&x).ok())
         .unwrap_or(json!({"dns_update":{"enabled":false}}));
-    json!({"profiles":index["profiles"],"selected":index["selected"],"autoconnect":index["autoconnect"],"settings":settings,"running":false,"starting":false,"dns_recovery_pending":bridge.root.join("runtime/dns-backup.json").exists(),"status_uncertain":true})
+    crate::presets::normalize(&mut settings);
+    json!({"profiles":index["profiles"],"selected":index["selected"],"autoconnect":index["autoconnect"],"settings":settings,"running":false,"starting":false,"dns_recovery_pending":bridge.root.join("runtime/dns-backup.json").exists(),"traffic_guard":{"configured":bridge.root.join("private/traffic-guard-plan.json").exists(),"verified":false,"protected":false},"status_uncertain":true})
 }
 pub fn run(base: PathBuf, root: PathBuf, stop: isize) -> Result<(), String> {
     // Only an isolated test worker can model SCM's actual boot-start reason.
@@ -1015,6 +1325,37 @@ pub fn run_with_startup(
     root: PathBuf,
     stop: isize,
     system_boot: bool,
+) -> Result<(), String> {
+    run_with_startup_mode(base, root, stop, system_boot, false)
+}
+pub fn run_cleanup_only(base: PathBuf, root: PathBuf, stop: isize) -> Result<(), String> {
+    run_with_startup_mode(base, root, stop, false, true)
+}
+fn initial_connection_desired(
+    initial: &Value,
+    saved: Option<&ConnectionIntent>,
+    system_boot: bool,
+    interrupted_disconnect: bool,
+    cleanup_only: bool,
+    durable_cancel: bool,
+) -> bool {
+    !cleanup_only
+        && !durable_cancel
+        && initial["status_uncertain"] != true
+        && if system_boot {
+            initial["autoconnect"] == true && startup_target(initial).is_some()
+        } else {
+            initial["selected"].as_str().is_some_and(|s| !s.is_empty())
+                && !interrupted_disconnect
+                && saved.is_some_and(|saved| saved.desired)
+        }
+}
+fn run_with_startup_mode(
+    base: PathBuf,
+    root: PathBuf,
+    stop: isize,
+    system_boot: bool,
+    cleanup_only: bool,
 ) -> Result<(), String> {
     std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
     let bridge = Bridge::new(base, root.clone(), stop)?;
@@ -1032,18 +1373,24 @@ pub fn run_with_startup(
             data
         }
     };
+    let cancellation = crate::setup::cleanup_request::pending(&root)?;
+    let durable_cancel = cancellation.is_some();
+    if cleanup_only && cancellation.is_none() {
+        return Err("CLEANUP_REQUEST_MISSING".into());
+    }
     let (saved, persistence_error) = match read_intent(&root) {
         Ok(saved) => (saved, None),
+        Err(error) if cancellation.is_some() => return Err(error),
         Err(error) => (None, Some(error)),
     };
-    let selected = initial["selected"].as_str().is_some_and(|s| !s.is_empty());
-    let initial_desired = initial["status_uncertain"] != true
-        && selected
-        && if system_boot {
-            initial["autoconnect"] == true
-        } else {
-            !interrupted_disconnect && saved.as_ref().is_some_and(|saved| saved.desired)
-        };
+    let initial_desired = initial_connection_desired(
+        &initial,
+        saved.as_ref(),
+        system_boot,
+        interrupted_disconnect,
+        cleanup_only,
+        durable_cancel,
+    );
     let intent = Arc::new(Mutex::new(ConnectionIntent {
         generation: saved.as_ref().map_or(0, |saved| saved.generation),
         desired: initial_desired,
@@ -1052,20 +1399,20 @@ pub fn run_with_startup(
         initial["last_error"] = json!(error);
         intent.lock().unwrap().desired = false;
     }
-    // Do not keep a temporary MutexGuard alive across the error branch: doing
-    // so used to deadlock startup when saving the intent failed.
-    let saved_initial = {
-        let current = intent.lock().unwrap();
-        save_intent(&root, &current)
-    };
-    if let Err(error) = saved_initial {
-        initial["last_error"] = json!(error);
-        intent.lock().unwrap().desired = false;
+    {
+        let mut current = intent.lock().unwrap();
+        finish_startup_intent(
+            &root,
+            &mut current,
+            &mut initial,
+            cleanup_only,
+            cancellation,
+        )?;
     }
     if !intent.lock().unwrap().desired
         && (initial["running"] == true || initial["starting"] == true)
     {
-        let result = bridge.call(&json!({"action":"Disconnect"}));
+        let result = bridge.call(&json!({"action":"Recover"}));
         match bridge.call(&json!({"action":"Snapshot"})) {
             Ok(data) => initial = data,
             Err(_) => {
@@ -1078,6 +1425,9 @@ pub fn run_with_startup(
                 initial["dns_recovery_pending"] =
                     json!(root.join("runtime/dns-backup.json").exists());
                 initial["status_uncertain"] = json!(true);
+                let configured = initial["traffic_guard"]["configured"] == true
+                    || root.join("private/traffic-guard-plan.json").exists();
+                initial["traffic_guard"] = json!({"configured":configured,"verified":false,"protected":false,"recovery_pending":configured});
             }
         }
         if let Err(error) = result {
@@ -1088,7 +1438,19 @@ pub fn run_with_startup(
     initial["operation_id"] = json!(0);
     initial["completed_operation_id"] = json!(0);
     initial["last_operation"] = Value::Null;
-    let cache = Arc::new(Mutex::new(initial));
+    let cache = Arc::new(Mutex::new(Snapshot::new(initial)));
+    let login_available = Arc::new(AtomicBool::new({
+        let data = cache.lock().unwrap();
+        !cleanup_only
+            && !durable_cancel
+            && !interrupted_disconnect
+            && (data["last_error"].is_null() || data["last_error"].as_str() == Some(""))
+    }));
+    let mut boot_target = if system_boot {
+        startup_target(&cache.lock().unwrap()).map(str::to_owned)
+    } else {
+        None
+    };
     let wake_handle = OwnedHandle(unsafe { CreateEventW(null(), 0, 0, null()) });
     if wake_handle.0.is_null() {
         return Err("Cannot create the request event".into());
@@ -1109,6 +1471,7 @@ pub fn run_with_startup(
             tx,
             (wake, stop, cancel),
             counter,
+            login_available,
         );
         if result.is_err() {
             platform::signal(stop);
@@ -1133,6 +1496,16 @@ pub fn run_with_startup(
         if let Some(at) = retry
             && at <= Instant::now()
         {
+            if let Err(error) = permit_connect(&root) {
+                let mut current = intent.lock().unwrap();
+                current.desired = false;
+                let _ = save_intent(&root, &current);
+                let mut data = cache.lock().unwrap();
+                data["last_error"] = json!(error);
+                decorate(&mut data, &current, "");
+                retry = None;
+                continue;
+            }
             let can_start = {
                 let current = intent.lock().unwrap();
                 if current.desired {
@@ -1148,14 +1521,26 @@ pub fn run_with_startup(
                 retry = None;
                 continue;
             }
-            let result = bridge.call(&json!({"action":"Connect"}));
+            let retry_generation = intent.lock().unwrap().generation;
+            let mut value = json!({"action":"Connect"});
+            if let Some(id) = &boot_target {
+                value["id"] = json!(id);
+            }
+            let mut result = bridge.call(&value);
+            if let Ok(data) = &mut result {
+                let current = intent.lock().unwrap();
+                if let Err(error) = remember_connection(&root, data, &current, retry_generation) {
+                    data["connection_history_warning"] = json!(error);
+                }
+            }
             match result {
                 Ok(mut data) => {
+                    boot_target = None;
                     if !intent.lock().unwrap().desired {
                         let pending_stop = ["Disconnect", "Exit"]
                             .contains(&cache.lock().unwrap()["operation"].as_str().unwrap_or(""));
                         if !pending_stop {
-                            let _ = bridge.call(&json!({"action":"Disconnect"}));
+                            let _ = bridge.call(&json!({"action":"Recover"}));
                         }
                         data = cached_snapshot(&bridge, &cache);
                     }
@@ -1169,7 +1554,7 @@ pub fn run_with_startup(
                     if !["Disconnect", "Exit"]
                         .contains(&cache.lock().unwrap()["operation"].as_str().unwrap_or(""))
                     {
-                        let _ = bridge.call(&json!({"action":"Disconnect"}));
+                        let _ = bridge.call(&json!({"action":"Recover"}));
                     }
                     let data = cached_snapshot(&bridge, &cache);
                     background_snapshot(&cache, &intent, data);
@@ -1193,6 +1578,9 @@ pub fn run_with_startup(
                 break;
             }
             let action = request.value["action"].as_str().unwrap_or("").to_owned();
+            if ["Connect", "Select", "Disconnect", "Exit"].contains(&action.as_str()) {
+                boot_target = None;
+            }
             if !ACTIONS.contains(&action.as_str()) {
                 let _ = request
                     .reply
@@ -1254,7 +1642,14 @@ pub fn run_with_startup(
                 let _ = request.reply.send(response);
                 continue;
             }
-            let mut result = bridge.call(&request.value);
+            let local_metadata = ["Rename", "Autoconnect"].contains(&action.as_str())
+                && cache.lock().unwrap()["status_uncertain"] != true;
+            let mut result = if local_metadata {
+                let snapshot = cache.lock().unwrap().clone();
+                profile_store::call(&root, &request.value, snapshot)
+            } else {
+                bridge.call(&request.value)
+            };
             if let Some(error) = &request.persistence_error {
                 result = Err(error.clone());
             }
@@ -1270,6 +1665,16 @@ pub fn run_with_startup(
                     retry = None;
                 }
                 result = Err("Подключение отменено".into());
+            }
+            if ["Connect", "Select"].contains(&action.as_str())
+                && let Ok(data) = &mut result
+            {
+                let current = intent.lock().unwrap();
+                if let Some(generation) = request.generation
+                    && let Err(error) = remember_connection(&root, data, &current, generation)
+                {
+                    data["connection_history_warning"] = json!(error);
+                }
             }
             let response = match result {
                 Ok(data) => {
@@ -1291,7 +1696,7 @@ pub fn run_with_startup(
                         let pending_disconnect = ["Disconnect", "Exit"]
                             .contains(&cache.lock().unwrap()["operation"].as_str().unwrap_or(""));
                         if !pending_disconnect {
-                            let _ = bridge.call(&json!({"action":"Disconnect"}));
+                            let _ = bridge.call(&json!({"action":"Recover"}));
                         }
                         let mut current = intent.lock().unwrap();
                         if request.generation == Some(current.generation)
@@ -1301,7 +1706,11 @@ pub fn run_with_startup(
                             let _ = save_intent(&root, &current);
                         }
                     }
-                    let data = cached_snapshot(&bridge, &cache);
+                    let data = if local_metadata {
+                        cache.lock().unwrap().clone()
+                    } else {
+                        cached_snapshot(&bridge, &cache)
+                    };
                     core = bridge.core();
                     complete(&cache, &intent, &request, data, &Err(error))
                 }
@@ -1319,7 +1728,7 @@ pub fn run_with_startup(
             core = None;
             stable_since = None;
             cache.lock().unwrap()["running"] = json!(false);
-            let _ = bridge.call(&json!({"action":"Disconnect"}));
+            let _ = bridge.call(&json!({"action":"Recover"}));
             let data = cached_snapshot(&bridge, &cache);
             background_snapshot(&cache, &intent, data);
             if intent.lock().unwrap().desired && failures < 3 {
@@ -1359,7 +1768,7 @@ pub fn run_with_startup(
         }
     }
     if !clean_exit {
-        let _ = bridge.call(&json!({"action":"Disconnect"}));
+        let _ = bridge.call(&json!({"action":"Recover"}));
     }
     if let Ok(result) = ready_rx.try_recv() {
         result?;
@@ -1370,6 +1779,258 @@ pub fn run_with_startup(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn conditional_status_invalidates_on_all_mutations_and_new_instances() {
+        let mut cache =
+            Snapshot::new(json!({"settings":{"raw":"x".repeat(2*1024*1024)},"running":false}));
+        let full = cache.response(&json!({"action":"Status"}));
+        assert!(full["data"].is_object());
+        let request = json!({"action":"Status","if_revision":full["revision"]});
+        let unchanged = cache.response(&request);
+        assert_eq!(unchanged["not_modified"], true);
+        assert!(unchanged.get("data").is_none());
+        assert!(serde_json::to_vec(&unchanged).unwrap().len() < 160);
+        let token = cache.token();
+        let _read_only = cache["settings"]["raw"].as_str().unwrap();
+        assert_eq!(cache.token(), token);
+        cache["last_error"] = json!("recovery failed");
+        assert!(cache.response(&request)["data"].is_object());
+        let request = json!({"if_revision":cache.token()});
+        cache.replace(json!({"running":true}));
+        assert!(cache.response(&request)["data"].is_object());
+        let restarted = Snapshot::new(cache.clone());
+        assert_ne!(cache.token(), restarted.token());
+        for revision in [Value::Null, json!(0), json!("old-version")] {
+            assert!(cache.response(&json!({"if_revision":revision}))["data"].is_object());
+        }
+    }
+
+    #[test]
+    #[ignore = "explicit release-mode performance probe"]
+    fn measure_conditional_status() {
+        let cache =
+            Snapshot::new(json!({"settings":{"raw":"x".repeat(2*1024*1024)},"running":false}));
+        for (name, request) in [
+            ("full", json!({"action":"Status"})),
+            (
+                "conditional",
+                json!({"action":"Status","if_revision":cache.token()}),
+            ),
+        ] {
+            let started = Instant::now();
+            let mut bytes = 0;
+            for _ in 0..100 {
+                let reply = cache.response(std::hint::black_box(&request));
+                bytes = serde_json::to_vec(std::hint::black_box(&reply))
+                    .unwrap()
+                    .len();
+            }
+            println!(
+                "{{\"case\":\"{name}\",\"response_bytes\":{bytes},\"mean_us\":{}}}",
+                started.elapsed().as_micros() / 100
+            );
+        }
+    }
+
+    #[test]
+    fn process_creation_format_preserves_epoch_fraction_and_utc_invariants() {
+        let mut time: SYSTEMTIME = unsafe { std::mem::zeroed() };
+        time.wYear = 1601;
+        time.wMonth = 1;
+        time.wDay = 1;
+        assert_eq!(
+            format_creation_time(&time, 0),
+            "1601-01-01T00:00:00.0000000Z"
+        );
+        assert_eq!(
+            format_creation_time(&time, 1),
+            "1601-01-01T00:00:00.0000001Z"
+        );
+        time.wYear = 2026;
+        time.wMonth = 10;
+        time.wDay = 10;
+        time.wHour = 17;
+        time.wMinute = 5;
+        time.wSecond = 9;
+        time.wMilliseconds = 999;
+        assert_eq!(
+            format_creation_time(&time, 12_345_678),
+            "2026-10-10T17:05:09.2345678Z"
+        );
+        assert_ne!(
+            format_creation_time(&time, 12_345_679),
+            format_creation_time(&time, 12_345_678)
+        );
+        let epoch = FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        };
+        assert_eq!(
+            creation_time_utc(&epoch).as_deref(),
+            Some("1601-01-01T00:00:00.0000000Z")
+        );
+        let fraction = FILETIME {
+            dwLowDateTime: 9_999_999,
+            dwHighDateTime: 0,
+        };
+        assert_eq!(
+            creation_time_utc(&fraction).as_deref(),
+            Some("1601-01-01T00:00:00.9999999Z")
+        );
+        let invalid = FILETIME {
+            dwLowDateTime: u32::MAX,
+            dwHighDateTime: u32::MAX,
+        };
+        assert!(creation_time_utc(&invalid).is_none());
+    }
+
+    #[test]
+    fn process_creation_query_fails_closed_for_an_invalid_handle() {
+        assert!(process_creation_time(null_mut()).is_none());
+        assert!(process_creation_time(unsafe { GetCurrentProcess() }).is_some());
+    }
+
+    #[test]
+    fn owned_core_checks_the_start_time_of_a_real_bundled_child() {
+        let package = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        let source = bundled_core_path(&package);
+        if !source.is_file() {
+            eprintln!("Skipping real ownership fixture: fetch a bundled core first.");
+            return;
+        }
+        static SERIAL: AtomicU64 = AtomicU64::new(0);
+        let tests = package.join("tests");
+        let root = tests.join(format!(
+            "native-owned-{}-{}",
+            std::process::id(),
+            SERIAL.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir(&root).expect("create isolated ownership fixture");
+        struct Fixture {
+            root: PathBuf,
+            parent: PathBuf,
+            child: Option<std::process::Child>,
+        }
+        impl Drop for Fixture {
+            fn drop(&mut self) {
+                if let Some(child) = &mut self.child {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+                if self.root.is_absolute()
+                    && self.root.parent() == Some(self.parent.as_path())
+                    && self
+                        .root
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .starts_with("native-owned-")
+                {
+                    let _ = std::fs::remove_dir_all(&self.root);
+                }
+            }
+        }
+        let mut fixture = Fixture {
+            root: root.clone(),
+            parent: tests,
+            child: None,
+        };
+        std::fs::create_dir(root.join("bin")).unwrap();
+        std::fs::create_dir(root.join("runtime")).unwrap();
+        std::fs::create_dir(root.join("private")).unwrap();
+        let image = root.join("bin").join("mihomo-mycelium.exe");
+        std::fs::copy(source, &image).expect("copy isolated core image");
+        let config = root.join("fixture.json");
+        std::fs::write(&config, json!({"mixed-port":0,"external-controller":"","allow-lan":false,
+            "log-level":"silent","geo-auto-update":false,"dns":{"enable":false},"tun":{"enable":false},
+            "proxies":[],"rules":["MATCH,REJECT"]}).to_string()).unwrap();
+        fixture.child = Some(
+            Command::new(&image)
+                .arg("-d")
+                .arg(&root)
+                .arg("-f")
+                .arg(config)
+                .creation_flags(CREATE_NO_WINDOW)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("start isolated core child"),
+        );
+        let child = fixture.child.as_ref().unwrap();
+        let created = process_creation_time(child.as_raw_handle() as HANDLE).unwrap();
+        let shell = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+            .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+        let output = Command::new(shell).args(["-NoProfile", "-NonInteractive", "-Command"])
+            .arg(format!("[Diagnostics.Process]::GetProcessById({}).StartTime.ToUniversalTime().ToString('o')", child.id()))
+            .creation_flags(CREATE_NO_WINDOW).output().expect("query fixture start time through .NET");
+        assert!(
+            output.status.success(),
+            "fixture process metadata query failed"
+        );
+        assert!(
+            String::from_utf8(output.stdout).unwrap().trim() == created,
+            "Rust and PowerShell creation timestamps must match exactly"
+        );
+        let bridge = Bridge::new(root.clone(), root.clone(), 0).unwrap();
+        let session = root.join("runtime/session.json");
+        let mut record =
+            json!({"pid":child.id(),"started":created,"core_path":image.to_string_lossy()});
+        let save = |value: &Value| std::fs::write(&session, value.to_string()).unwrap();
+        save(&record);
+        assert!(
+            bridge.core().is_some(),
+            "the real recorded bundled child must be owned"
+        );
+        record["started"] = json!("1601-01-01T00:00:00.0000000Z");
+        save(&record);
+        assert!(
+            bridge.core().is_none(),
+            "a real PID with a stale creation timestamp must be rejected"
+        );
+        record["started"] = json!(created.replace('Z', "+00:00"));
+        save(&record);
+        assert!(
+            bridge.core().is_none(),
+            "the persisted UTC timestamp must use the PowerShell round-trip format"
+        );
+        record.as_object_mut().unwrap().remove("started");
+        save(&record);
+        assert!(
+            bridge.core().is_none(),
+            "missing start time must fail closed"
+        );
+        record["started"] = json!(created);
+        record["pid"] = json!(u64::from(child.id()) + (1_u64 << 32));
+        save(&record);
+        assert!(
+            bridge.core().is_none(),
+            "a PID outside the Windows range must never wrap to a live child"
+        );
+        record["pid"] = json!(child.id());
+        record["core_path"] = Value::Null;
+        save(&record);
+        assert!(
+            bridge.core().is_none(),
+            "invalid recorded path must fail closed"
+        );
+        record["core_path"] = json!(image.to_string_lossy());
+        save(&record);
+        std::fs::write(root.join("bin/mycelium-build.json"), "{damaged manifest").unwrap();
+        assert!(
+            bridge.core().is_some(),
+            "damaged manifest cannot hide the running owned child"
+        );
+        std::fs::remove_file(root.join("bin/mycelium-build.json")).unwrap();
+        assert!(
+            bridge.core().is_some(),
+            "removed manifest cannot hide the running owned child"
+        );
+    }
+
     #[test]
     fn bridge_frame_handles_fragmented_unicode_and_exact_size_boundaries() {
         struct Fragmented<'a>(&'a [u8]);
@@ -1423,93 +2084,343 @@ mod tests {
     }
 
     #[test]
-    fn lost_exit_requires_stopped_recovered_persisted_state() {
-        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .canonicalize()
-            .unwrap();
-        let target = manifest.join("target");
-        let root = target.join(format!("exit-unit-{}", std::process::id()));
-        std::fs::create_dir(&root).expect("fixture directory must be new");
-        struct Fixture(PathBuf, PathBuf);
-        impl Drop for Fixture {
-            fn drop(&mut self) {
-                let canonical = self.0.canonicalize().unwrap();
-                assert!(canonical.starts_with(&self.1));
-                assert!(
-                    canonical
-                        .file_name()
-                        .unwrap()
-                        .to_string_lossy()
-                        .starts_with("exit-unit-")
-                );
-                std::fs::remove_dir_all(canonical).unwrap();
+    fn stopped_or_starting_core_cannot_report_protected_even_with_verified_filters() {
+        for running in [json!(false), Value::Null, json!("true"), json!(true)] {
+            for starting in [false, true] {
+                let mut snapshot = json!({"running":running,"starting":starting,
+                    "traffic_guard":{"configured":true,"armed":true,"verified":true,
+                        "protected":true,"active_owned_tun":true}});
+                let expected = running == true && !starting;
+                decorate(&mut snapshot, &ConnectionIntent::default(), "");
+                assert_eq!(snapshot["traffic_guard"]["protected"], expected);
+                assert_eq!(snapshot["traffic_guard"]["verified"], true);
+                assert_eq!(snapshot["traffic_guard"]["armed"], true);
+                assert_eq!(snapshot["can_disconnect"], true);
+                if !expected && !starting {
+                    assert_eq!(snapshot["phase"], "recovery");
+                    assert_eq!(snapshot["traffic_guard"]["recovery_pending"], true);
+                }
             }
         }
-        let _fixture = Fixture(root.clone(), manifest);
-        std::fs::create_dir(root.join("runtime")).unwrap();
-        let mut status: SERVICE_STATUS_PROCESS = unsafe { std::mem::zeroed() };
-        status.dwCurrentState = SERVICE_STOPPED;
-        assert!(
-            !clean_runtime(&root, &status),
-            "missing persisted intent cannot confirm Exit"
-        );
-        save_intent(
-            &root,
-            &ConnectionIntent {
-                generation: 1,
-                desired: false,
-            },
-        )
-        .unwrap();
-        assert!(
-            clean_runtime(&root, &status),
-            "stopped controller with recovered network confirms lost receipt"
-        );
-        status.dwCurrentState = SERVICE_RUNNING;
-        assert!(
-            !clean_runtime(&root, &status),
-            "running controller cannot confirm Exit"
-        );
-        status.dwCurrentState = SERVICE_STOP_PENDING;
-        assert!(
-            !clean_runtime(&root, &status),
-            "stop-pending controller must finish first"
-        );
-        status.dwCurrentState = SERVICE_STOPPED;
-        status.dwProcessId = 42;
-        assert!(
-            !clean_runtime(&root, &status),
-            "remaining service PID cannot confirm Exit"
-        );
-        status.dwProcessId = 0;
-        for file in ["runtime/session.json", "runtime/dns-backup.json"] {
-            std::fs::write(root.join(file), b"synthetic metadata").unwrap();
-            assert!(
-                !clean_runtime(&root, &status),
-                "unrecovered runtime must keep Exit UI available"
-            );
-            std::fs::remove_file(root.join(file)).unwrap();
+    }
+    #[test]
+    fn cleanup_only_start_never_resumes_saved_or_boot_connect_intent() {
+        let saved = ConnectionIntent {
+            generation: 7,
+            desired: true,
+        };
+        let initial = json!({"selected":"existing-profile","profiles":[{"id":"existing-profile"}],"autoconnect":true});
+        assert!(initial_connection_desired(
+            &initial,
+            Some(&saved),
+            false,
+            false,
+            false,
+            false
+        ));
+        assert!(initial_connection_desired(
+            &initial,
+            Some(&saved),
+            true,
+            false,
+            false,
+            false
+        ));
+        assert!(!initial_connection_desired(
+            &initial,
+            Some(&saved),
+            false,
+            true,
+            false,
+            false
+        ));
+        for boot in [false, true] {
+            for cancelled in [false, true] {
+                assert!(!initial_connection_desired(
+                    &initial,
+                    Some(&saved),
+                    boot,
+                    cancelled,
+                    true,
+                    false
+                ));
+            }
         }
-        save_intent(
-            &root,
+        assert!(!initial_connection_desired(
+            &json!({"selected":"existing-profile","status_uncertain":true}),
+            Some(&saved),
+            false,
+            false,
+            false,
+            false
+        ));
+        assert!(!initial_connection_desired(
+            &json!({"selected":""}),
+            Some(&saved),
+            false,
+            false,
+            false,
+            false
+        ));
+    }
+    #[test]
+    fn startup_uses_last_success_and_never_falls_back_from_explicit_empty_history() {
+        let a = "a".repeat(32);
+        let b = "b".repeat(32);
+        let mut data = json!({"selected":b,"last_connected":a,"profiles":[{"id":a},{"id":b}],"autoconnect":true});
+        assert_eq!(startup_target(&data), Some(a.as_str()));
+        data["selected"] = json!("");
+        data["profiles"] = json!([{"id":a}]);
+        assert!(initial_connection_desired(
+            &data, None, true, false, false, false
+        ));
+        data["last_connected"] = json!("");
+        assert_eq!(startup_target(&data), None);
+        data["selected"] = json!(a);
+        data.as_object_mut().unwrap().remove("last_connected");
+        assert_eq!(startup_target(&data), Some(a.as_str()));
+        data["last_connected"] = json!(b);
+        assert_eq!(startup_target(&data), None);
+    }
+    #[test]
+    fn login_admission_is_once_only_and_respects_boot_manual_and_recovery_states() {
+        let a = "a".repeat(32);
+        let data = json!({"last_connected":a,"profiles":[{"id":a}],"autoconnect":true,"service_ready":true,"phase":"idle","last_error":null});
+        let idle = ConnectionIntent {
+            generation: 1,
+            desired: false,
+        };
+        let mut available = true;
+        assert!(allow_login_connect(&data, &idle, &mut available));
+        assert!(!allow_login_connect(&data, &idle, &mut available));
+        let mut empty_error = data.clone();
+        empty_error["last_error"] = json!("");
+        let mut available = true;
+        assert!(allow_login_connect(&empty_error, &idle, &mut available));
+        for (field, value) in [
+            ("busy", json!(true)),
+            ("running", json!(true)),
+            ("starting", json!(true)),
+            ("phase", json!("recovery")),
+            ("service_ready", json!(false)),
+            ("status_uncertain", json!(true)),
+            ("shutting_down", json!(true)),
+            ("last_error", json!("failure")),
+            ("autoconnect", json!(false)),
+            ("last_connected", json!("")),
+        ] {
+            let mut blocked = data.clone();
+            blocked[field] = value;
+            let mut available = true;
+            assert!(
+                !allow_login_connect(&blocked, &idle, &mut available),
+                "{field}"
+            );
+            assert!(!available);
+        }
+        let mut available = true;
+        assert!(!allow_login_connect(
+            &data,
             &ConnectionIntent {
                 generation: 2,
-                desired: true,
+                desired: true
             },
+            &mut available
+        ));
+        assert!(!available);
+    }
+    #[test]
+    fn connection_history_commits_only_the_successful_current_generation() {
+        let root = std::env::temp_dir().join(format!(
+            "mukhomor-history-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("private")).unwrap();
+        let a = "a".repeat(32);
+        let b = "b".repeat(32);
+        let path = root.join("private/profiles.json");
+        let index =
+            json!({"schema":1,"selected":b,"last_connected":a,"profiles":[{"id":a},{"id":b}]});
+        let original = serde_json::to_vec(&index).unwrap();
+        std::fs::write(&path, &original).unwrap();
+        let current = ConnectionIntent {
+            generation: 3,
+            desired: true,
+        };
+        let mut data = json!({"selected":b,"last_connected":a,"running":false});
+        remember_connection(&root, &mut data, &current, 3).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        data["running"] = json!(true);
+        remember_connection(&root, &mut data, &current, 2).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        remember_connection(
+            &root,
+            &mut data,
+            &ConnectionIntent {
+                generation: 3,
+                desired: false,
+            },
+            3,
         )
         .unwrap();
-        assert!(
-            !clean_runtime(&root, &status),
-            "saved reconnect intent is not a completed Exit"
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        remember_connection(&root, &mut data, &current, 3).unwrap();
+        assert_eq!(data["last_connected"], b);
+        let saved: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved["last_connected"], b);
+        assert_eq!(saved["profiles"], index["profiles"]);
+        std::fs::write(&path, &original).unwrap();
+        std::fs::create_dir(root.join("private/profiles.json.pending")).unwrap();
+        data["last_connected"] = json!(a);
+        assert!(remember_connection(&root, &mut data, &current, 3).is_err());
+        assert_eq!(data["running"], true);
+        assert_eq!(data["last_connected"], a);
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+    #[test]
+    fn cleanup_startup_rejects_actual_intent_persistence_failure_before_readiness() {
+        let root = std::env::temp_dir().join(format!(
+            "mukhomor-intent-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let runtime = root.join("runtime");
+        std::fs::create_dir_all(&runtime).unwrap();
+        let previous = br#"{"schema":1,"generation":7,"desired":true}"#;
+        std::fs::write(runtime.join("connection-intent.json"), previous).unwrap();
+        // A directory at the temporary file name causes a real create_new
+        // failure without changing permissions or invoking SCM/WFP.
+        std::fs::create_dir(runtime.join("connection-intent.json.pending")).unwrap();
+        let mut intent = ConnectionIntent {
+            generation: 7,
+            desired: false,
+        };
+        let mut initial = json!({});
+        assert!(persist_startup_intent(&root, &mut intent, &mut initial, true).is_err());
+        assert_eq!(initial["service_ready"], Value::Null);
+        assert_eq!(
+            std::fs::read(runtime.join("connection-intent.json")).unwrap(),
+            previous
         );
+        assert!(read_intent(&root).unwrap().unwrap().desired);
+        intent.desired = true;
+        assert!(persist_startup_intent(&root, &mut intent, &mut initial, false).is_ok());
+        assert!(!intent.desired);
+        assert!(initial["last_error"].is_string());
+        std::fs::remove_dir(runtime.join("connection-intent.json.pending")).unwrap();
+        assert!(persist_startup_intent(&root, &mut intent, &mut initial, true).is_ok());
+        assert!(!read_intent(&root).unwrap().unwrap().desired);
+        assert_eq!(read_intent(&root).unwrap().unwrap().generation, 7);
+        std::fs::remove_file(runtime.join("connection-intent.json")).unwrap();
+        std::fs::remove_dir(runtime).unwrap();
+        std::fs::remove_dir(root).unwrap();
+    }
+    #[test]
+    fn durable_cancellation_survives_failed_persistence_and_is_consumed_after_false() {
+        let tree = crate::setup::cleanup_request::fixtures::Tree::new();
+        crate::setup::cleanup_request::publish(&tree.root).unwrap();
+        let cancel = crate::setup::cleanup_request::pending(&tree.root)
+            .unwrap()
+            .unwrap();
+        let saved = read_intent(&tree.root).unwrap().unwrap();
+        for boot in [false, true] {
+            assert!(!initial_connection_desired(
+                &json!({"selected":"existing-profile","autoconnect":true}),
+                Some(&saved),
+                boot,
+                false,
+                false,
+                true
+            ));
+        }
+        let pending_path = tree.root.join("runtime/connection-intent.json.pending");
+        std::fs::create_dir(&pending_path).unwrap();
+        let mut intent = ConnectionIntent {
+            generation: 7,
+            desired: false,
+        };
+        let mut initial = json!({});
+        assert!(
+            finish_startup_intent(&tree.root, &mut intent, &mut initial, true, Some(cancel))
+                .is_err()
+        );
+        assert_eq!(initial["service_ready"], Value::Null);
+        assert!(read_intent(&tree.root).unwrap().unwrap().desired);
+        let cancel = crate::setup::cleanup_request::pending(&tree.root)
+            .unwrap()
+            .unwrap();
+        std::fs::remove_dir(&pending_path).unwrap();
+        // A subsequent ordinary SCM restart has no cleanup startup argument,
+        // but still completes the durable request before any ready/Connect.
+        finish_startup_intent(&tree.root, &mut intent, &mut initial, false, Some(cancel)).unwrap();
+        let saved = read_intent(&tree.root).unwrap().unwrap();
+        assert!(!saved.desired);
+        assert_eq!(saved.generation, 7);
+        assert!(
+            crate::setup::cleanup_request::pending(&tree.root)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(initial["service_ready"], Value::Null);
+    }
+    #[test]
+    fn cleanup_cancellation_admission_blocks_connect_until_durable_false_and_consume() {
+        let tree = crate::setup::cleanup_request::fixtures::Tree::new();
+        let mut intent = read_intent(&tree.root).unwrap().unwrap();
+        crate::setup::cleanup_request::publish(&tree.root).unwrap();
+        assert_eq!(
+            admit_connection_intent(&tree.root, &mut intent, "Connect").unwrap_err(),
+            "CLEANUP_REQUEST_PENDING"
+        );
+        assert!(!intent.desired);
+        assert!(!read_intent(&tree.root).unwrap().unwrap().desired);
+        assert!(permit_connect(&tree.root).is_err());
+        admit_connection_intent(&tree.root, &mut intent, "Disconnect").unwrap();
+        assert!(
+            crate::setup::cleanup_request::pending(&tree.root)
+                .unwrap()
+                .is_none()
+        );
+        assert!(permit_connect(&tree.root).is_ok());
+        admit_connection_intent(&tree.root, &mut intent, "Connect").unwrap();
+        assert!(intent.desired);
+        assert!(read_intent(&tree.root).unwrap().unwrap().desired);
+        crate::setup::cleanup_request::publish(&tree.root).unwrap();
+        let path = tree.root.join("runtime/connection-intent.json.pending");
+        std::fs::create_dir(&path).unwrap();
+        assert!(admit_connection_intent(&tree.root, &mut intent, "Exit").is_err());
+        assert!(!intent.desired);
+        assert!(read_intent(&tree.root).unwrap().unwrap().desired);
+        assert!(
+            crate::setup::cleanup_request::pending(&tree.root)
+                .unwrap()
+                .is_some()
+        );
+        assert!(permit_connect(&tree.root).is_err());
+        std::fs::remove_dir(&path).unwrap();
+        admit_connection_intent(&tree.root, &mut intent, "Exit").unwrap();
+        assert!(!read_intent(&tree.root).unwrap().unwrap().desired);
+        assert!(permit_connect(&tree.root).is_ok());
         std::fs::write(
-            root.join("runtime/connection-intent.json"),
-            b"damaged fixture",
+            tree.root.join("recovery-request/disconnect.request"),
+            b"malformed",
         )
         .unwrap();
-        assert!(
-            !clean_runtime(&root, &status),
-            "damaged intent is not a completed Exit"
+        assert!(admit_connection_intent(&tree.root, &mut intent, "Connect").is_err());
+        assert!(admit_connection_intent(&tree.root, &mut intent, "Disconnect").is_err());
+        assert_eq!(
+            std::fs::read(tree.root.join("recovery-request/disconnect.request")).unwrap(),
+            b"malformed"
         );
+        assert!(!read_intent(&tree.root).unwrap().unwrap().desired);
+        assert!(permit_connect(&tree.root).is_err());
     }
 }

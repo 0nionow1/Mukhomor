@@ -8,8 +8,10 @@ foreach ($file in $manifest.files) {
     $path=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot $file.path))
     if (!$path.StartsWith(([IO.Path]::GetFullPath($PSScriptRoot)+'\'),[StringComparison]::OrdinalIgnoreCase) -or !$seen.Add($path) -or $file.sha256 -notmatch '^[a-f0-9]{64}$' -or (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $file.sha256) {throw ('Package verification failed: '+$file.path)}
 }
-foreach($required in @('mukhomor.exe','NativeBridge.ps1','SplitVpn.psm1','SplitWindows.psm1','ProfileImport.psm1','bin\mihomo-windows-amd64-compatible.exe','bin\wintun.dll','assets\settings.default.json')){if(!$seen.Contains((Join-Path $PSScriptRoot $required))){throw ('Missing application file: '+$required)}}
+foreach($required in @('mukhomor.exe','NativeBridge.ps1','SplitVpn.psm1','RulePresets.ps1','SplitWindows.psm1','TrafficGuard.psm1','ProfileImport.psm1','bin\mihomo-windows-amd64-compatible.exe','bin\wintun.dll','assets\settings.default.json')){if(!$seen.Contains((Join-Path $PSScriptRoot $required))){throw ('Missing application file: '+$required)}}
+if(!$seen.Contains((Join-Path $PSScriptRoot 'AppStartup.ps1'))){throw 'Missing application file: AppStartup.ps1'}
 if($VerifyOnly){Write-Host ('Verified release '+$manifest.version+'; '+$seen.Count+' files');return}
+. (Join-Path $PSScriptRoot 'AppStartup.ps1')
 $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
 if (!(New-Object Security.Principal.WindowsPrincipal($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {throw 'Windows administrator approval is required to configure the VPN'}
 if (!$OwnerSid) {$OwnerSid=$identity.User.Value}
@@ -67,7 +69,7 @@ function Set-AppEntries([string]$Executable,[string]$ReleaseVersion) {
     foreach($key in @('NoModify','NoRepair')) {New-ItemProperty -LiteralPath $uninstallKey -Name $key -Value 1 -PropertyType DWord -Force | Out-Null}
 }
 function Give-OwnerStartAccess([string]$Sid) {
-    # Allow only this installation's owner to start/query the immutable own
+    # Allow only this installation's owner to start/query/read the immutable own
     # controller. Preserve the existing SYSTEM/admin and service ACL entries.
     $descriptorLines=@(& sc.exe sdshow 'Mukhomor')
     if($LASTEXITCODE -ne 0){throw 'Unable to read controller permissions'}
@@ -77,17 +79,41 @@ function Give-OwnerStartAccess([string]$Sid) {
     $acl=$descriptor.DiscretionaryAcl
     if(!$acl){throw 'The controller has no protected access list'}
     $granted=$false
+    $changed=$false
     foreach($entry in $acl) {
-        if($entry -is [Security.AccessControl.CommonAce] -and $entry.AceQualifier -eq [Security.AccessControl.AceQualifier]::AccessAllowed -and $entry.SecurityIdentifier -eq $identity -and ($entry.AccessMask -band 21) -eq 21){$granted=$true}
+        if($entry -is [Security.AccessControl.CommonAce] -and $entry.AceQualifier -eq [Security.AccessControl.AceQualifier]::AccessAllowed -and $entry.SecurityIdentifier -eq $identity -and ($entry.AccessMask -band 21) -eq 21){
+            $granted=$true
+            if(($entry.AccessMask -band 131072) -eq 0){$entry.AccessMask=$entry.AccessMask -bor 131072;$changed=$true}
+        }
     }
     if(!$granted) {
         $position=0
         while($position -lt $acl.Count -and $acl[$position].AceType -eq [Security.AccessControl.AceType]::AccessDenied){$position++}
-        $entry=New-Object Security.AccessControl.CommonAce([Security.AccessControl.AceFlags]::None,[Security.AccessControl.AceQualifier]::AccessAllowed,21,$identity,$false,$null)
+        $entry=New-Object Security.AccessControl.CommonAce([Security.AccessControl.AceFlags]::None,[Security.AccessControl.AceQualifier]::AccessAllowed,131093,$identity,$false,$null)
         $acl.InsertAce($position,$entry)
+        $changed=$true
+    }
+    if($changed) {
         & sc.exe sdset 'Mukhomor' ($descriptor.GetSddlForm([Security.AccessControl.AccessControlSections]::All)) | Out-Null
         if($LASTEXITCODE -ne 0){throw 'Unable to allow the owner to reopen Mukhomor'}
     }
+}
+function Set-RecoveryRequestAcl([string]$Data,[string]$Sid) {
+    # The ordinary installation owner may cancel an unavailable controller
+    # without obtaining write access to its runtime intent or credentials.
+    $path=Join-Path $Data 'recovery-request'
+    if((Test-Path -LiteralPath $path) -and ((Get-Item -LiteralPath $path).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Recovery request directory is a reparse point'}
+    [IO.Directory]::CreateDirectory($path)|Out-Null
+    $acl=New-Object Security.AccessControl.DirectorySecurity
+    $acl.SetOwner((New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')))
+    $acl.SetAccessRuleProtection($true,$false)
+    foreach($trustedSid in @('S-1-5-18','S-1-5-32-544')){
+        $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier($trustedSid)),'FullControl','ContainerInherit,ObjectInherit','None','Allow')))
+    }
+    $identity=New-Object Security.Principal.SecurityIdentifier($Sid)
+    $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($identity,[Security.AccessControl.FileSystemRights]1179851,'None','None','Allow')))
+    $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($identity,[Security.AccessControl.FileSystemRights]1245599,'ObjectInherit','InheritOnly','Allow')))
+    Set-Acl -LiteralPath $path -AclObject $acl
 }
 if ([IO.Path]::GetDirectoryName($program) -ne [IO.Path]::GetFullPath([Environment]::GetFolderPath('ProgramFiles')) -or [IO.Path]::GetDirectoryName($data) -ne [IO.Path]::GetFullPath([Environment]::GetFolderPath('CommonApplicationData'))) {throw 'Invalid installation target'}
 foreach ($path in @($program,$data)) {
@@ -108,6 +134,7 @@ if(Test-Path -LiteralPath (Join-Path $data 'installation.json')) {
     if($owner -notin @('S-1-5-18','S-1-5-32-544')){throw 'Existing data directory is not protected by Windows'}
 }
 Set-ManagedAcl $program $false; Set-ManagedAcl $data $true
+Set-RecoveryRequestAcl $data $OwnerSid
 $version=Join-Path $program ('app-'+$manifest.version+'-'+[guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($version) | Out-Null
 foreach ($file in $manifest.files) {
@@ -181,6 +208,7 @@ try {Start-Service -Name 'Mukhomor'} catch {
     $activeDefinition=Get-CimInstance Win32_Service -Filter "Name='Mukhomor'"
     if($activeService.Status -ne 'Running' -or $activeDefinition.PathName -ne $binary){throw}
 }
+Update-AppStartupRegistration $OwnerSid $program $executable
 } catch {
     if(!$upgradeCommitted -and $serviceDisabled) {
         $currentService=Get-Service -Name 'Mukhomor'

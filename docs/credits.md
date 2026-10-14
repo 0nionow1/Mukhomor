@@ -9,7 +9,7 @@ Mukhomor — независимый клиент с интерфейсом и у
 | Mukhomor | Rust/Win32 интерфейс, контроллер, импорт и PowerShell управление Windows | [MIT](../LICENSE); сохранено упоминание исходных VPN-Split contributors |
 | mihomo **v1.19.32** | Неизменённый отдельный процесс: протоколы, DNS, TUN и правила | [MetaCubeX/mihomo, закреплённый тег](https://github.com/MetaCubeX/mihomo/tree/v1.19.32), [GPL-3.0](../Mihomo-LICENSE.txt) |
 | Wintun **0.14.1** | Официальная неизменённая amd64 DLL для TUN | [wintun.net](https://www.wintun.net/), [Prebuilt Binaries License](../Wintun-LICENSE.txt) |
-| meta-rules-dat | Начальные списки Россия, Steam, Ozon; сортировка и удаление точных дублей | [MetaCubeX/meta-rules-dat](https://github.com/MetaCubeX/meta-rules-dat), [GPL-3.0](../Rules-LICENSE.txt), [происхождение списков](../lists/sources.json) |
+| meta-rules-dat | Начальные списки игровых платформ/CDN, России, Steam, Ozon; сортировка и удаление точных дублей | [MetaCubeX/meta-rules-dat](https://github.com/MetaCubeX/meta-rules-dat), [GPL-3.0](../Rules-LICENSE.txt), [происхождение списков](../lists/sources.json) |
 | Tiny5 Regular | Встроенный пиксельный шрифт с кириллицей | [Google Fonts](https://github.com/google/fonts/tree/main/ofl/tiny5), [SIL OFL 1.1](../Tiny5-LICENSE.txt), [SHA256](../assets/fonts/README.md) |
 | Rust crates | JSON, Win32 bindings и транзитивные зависимости | [Cargo.lock](https://github.com/0nionow1/Mukhomor/blob/main/native/Cargo.lock), тексты в [ThirdParty-LICENSE.txt](../ThirdParty-LICENSE.txt) |
 

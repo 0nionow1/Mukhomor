@@ -1,6 +1,7 @@
 ﻿Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 Import-Module (Join-Path $PSScriptRoot 'SplitVpn.psm1') -DisableNameChecking
+Import-Module (Join-Path $PSScriptRoot 'TrafficGuard.psm1') -DisableNameChecking
 
 function Test-SplitAdmin {
     $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
@@ -13,7 +14,15 @@ function Get-OwnedCore([string]$Root) {
     $session=Read-JsonFile $path
     $process=Get-Process -Id $session.pid -ErrorAction SilentlyContinue
     if (!$process) { return $null }
-    if ($process.Path -ne (Get-CorePath $Root) -or $process.StartTime.ToUniversalTime().ToString('o') -ne $session.started) { return $null }
+    # Ownership survives damaged/deleted on-disk binaries or a manifest change.
+    # Integrity is checked before launch, never as a condition for disconnect.
+    $base=if($env:MUKHOMOR_ASSETS){$env:MUKHOMOR_ASSETS}else{$Root}
+    $allowed=@((Convert-SplitProgramPath (Join-Path $base 'bin\mihomo-windows-amd64-compatible.exe')),(Convert-SplitProgramPath (Join-Path $base 'bin\mihomo-mycelium.exe')))
+    if($env:MUKHOMOR_CORE_PATH){$allowed+=Convert-SplitProgramPath $env:MUKHOMOR_CORE_PATH}
+    if(!$process.Path){return $null}
+    $actual=Convert-SplitProgramPath $process.Path
+    $recorded=if($session.ContainsKey('core_path')){Convert-SplitProgramPath $session.core_path}else{$actual}
+    if($recorded -notin $allowed -or $actual -ne $recorded -or $process.StartTime.ToUniversalTime().ToString('o') -ne $session.started){return $null}
     return $process
 }
 
@@ -139,7 +148,18 @@ function Resolve-SplitEndpoint([string]$Server) {
 
 function Get-SplitTransport([string]$Root, [scriptblock]$Resolver=${function:Resolve-SplitEndpoint}) {
     $proxy=Get-SelectedSplitProxy $Root
-    $addresses=@((& $Resolver $proxy.server) | Sort-Object @{Expression={if ($_.AddressFamily -eq 'InterNetwork') {0} else {1}}},@{Expression={$_.ToString()}} -Unique)
+    $cached=$null
+    $cachePath=Join-Path $Root 'private\traffic-guard-transport.json'
+    if (Test-Path -LiteralPath (Join-Path $Root 'private\traffic-guard-plan.json')) {
+        if (!(Test-Path -LiteralPath $cachePath) -or (Get-Item -LiteralPath $cachePath).Length -gt 4096) {throw 'Protected VPN endpoint cache is missing or invalid; disconnect before resolving a new endpoint'}
+        $previous=Read-JsonFile $cachePath
+        if ($previous.server -cne $proxy.server -or $previous.port -ne $proxy.port) {throw 'Disconnect VPN before selecting a different protected endpoint'}
+        $literal=$null
+        if (![Net.IPAddress]::TryParse([string]$previous.selected_address,[ref]$literal) -or $literal.Equals([Net.IPAddress]::Any) -or $literal.Equals([Net.IPAddress]::IPv6Any) -or [Net.IPAddress]::IsLoopback($literal)) {throw 'Invalid protected VPN endpoint cache'}
+        $cached=@($literal)
+    }
+    $resolved=if($cached){$cached}else{& $Resolver $proxy.server}
+    $addresses=@($resolved | Sort-Object @{Expression={if ($_.AddressFamily -eq 'InterNetwork') {0} else {1}}},@{Expression={$_.ToString()}} -Unique)
     if (!$addresses.Count) { throw 'VPN endpoint has no IP addresses' }
     foreach ($address in $addresses) {
         $routes=@(Find-NetRoute -RemoteIPAddress $address.ToString() -ErrorAction SilentlyContinue | Where-Object { $_.PSObject.Properties.Name -contains 'NextHop' })
@@ -209,6 +229,7 @@ function Start-SplitSession([string]$Root, [bool]$TunEnabled=$true) {
     if (Get-OwnedCore $Root) { throw 'Mukhomor is already running' }
     if (Test-Path -LiteralPath (Join-Path $Root 'runtime\dns-backup.json')) { Restore-SessionDns $Root }
     $s=Get-SplitSettings $Root
+    $full=($TunEnabled -and $s.ContainsKey('routing') -and $s.routing.mode -ceq 'full')
     $transport=Get-SplitTransport $Root
     Assert-SplitNotCancelled $Root
     Set-SplitConfig $Root $s $false -Transport $transport
@@ -216,8 +237,10 @@ function Start-SplitSession([string]$Root, [bool]$TunEnabled=$true) {
     Assert-SplitNotCancelled $Root
     $core=$null
     try {
-        $core=Start-Process -FilePath (Get-CorePath $Root) -ArgumentList @('-d',('"'+$Root+'"'),'-f',('"'+$configPath+'"')) -WorkingDirectory $Root -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $Root 'runtime\logs\core.log') -RedirectStandardError (Join-Path $Root 'runtime\logs\core-error.log')
-        $session=@{pid=$core.Id;started=$core.StartTime.ToUniversalTime().ToString('o');mode=$(if ($TunEnabled) {'tun'} else {'proxy'});phase='starting';transport=$transport}
+        if ($full) {Enable-SplitTrafficGuard $Root $s $transport}
+        $program=Get-CorePath $Root
+        $core=Start-Process -FilePath $program -ArgumentList @('-d',('"'+$Root+'"'),'-f',('"'+$configPath+'"')) -WorkingDirectory $Root -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $Root 'runtime\logs\core.log') -RedirectStandardError (Join-Path $Root 'runtime\logs\core-error.log')
+        $session=@{pid=$core.Id;started=$core.StartTime.ToUniversalTime().ToString('o');core_path=$program;mode=$(if ($TunEnabled) {'tun'} else {'proxy'});phase='starting';transport=$transport}
         Write-AtomicJson (Join-Path $Root 'runtime\session.json') $session
         $ready=$false
         $readyClock=[Diagnostics.Stopwatch]::StartNew()
@@ -239,6 +262,7 @@ function Start-SplitSession([string]$Root, [bool]$TunEnabled=$true) {
                 Start-Sleep -Milliseconds 100
             }
             if (!$adapterReady) { throw 'TUN adapter did not start. DNS was not changed; inspect the core log.' }
+            if ($full) {Complete-SplitTrafficGuard $Root}
             Set-SplitTunFirewall $Root
             # A working proxy before TUN does not prove that outer UDP survives
             # the new routes. Verify it again before touching adapter DNS.
@@ -272,11 +296,14 @@ function Start-SplitSession([string]$Root, [bool]$TunEnabled=$true) {
     }
 }
 
-function Stop-SplitSession([string]$Root) {
+function Stop-SplitSession([string]$Root, [switch]$ReleaseGuard) {
     $dnsFailure=$null
     try { Restore-SessionDns $Root } catch { $dnsFailure=$_ }
     finally { Stop-OwnedCore $Root }
     if ($dnsFailure) { throw $dnsFailure }
+    # Automatic recovery/reconnect retain protection. Explicit disconnect is
+    # allowed to release it only after DNS recovery and owned-core shutdown.
+    if ($ReleaseGuard) {Disable-SplitTrafficGuard $Root}
 }
 
 function Write-SplitDiagnostics([string]$Root) {
@@ -323,7 +350,14 @@ function Get-SplitStatus([string]$Root) {
     }
     $starting=$false
     if ($p) { $starting=(Read-JsonFile (Join-Path $Root 'runtime\session.json')).phase -eq 'starting' }
-    return @{running=($null -ne $p);starting=$starting;dns_hosts=$count;dns_refresh_pending=$pending;dns_failed_hosts=$failed;dns_recovery_pending=(Test-Path -LiteralPath (Join-Path $Root 'runtime\dns-backup.json'));profile_present=((Test-Path -LiteralPath (Join-Path $Root 'private\selected-profile.json')) -or (Test-Path -LiteralPath (Join-Path $Root 'private\awg.conf')))}
+    $guard=Get-SplitTrafficGuardStatus $Root
+    if (!$p -or $starting) {
+        # Persistent filters can remain verified after the tunnel process stops.
+        # A working protected tunnel also requires the exact owned core.
+        $guard.protected=$false
+        if ($guard.configured) {$guard.recovery_pending=$true}
+    }
+    return @{running=($null -ne $p);starting=$starting;traffic_guard=$guard;dns_hosts=$count;dns_refresh_pending=$pending;dns_failed_hosts=$failed;dns_recovery_pending=(Test-Path -LiteralPath (Join-Path $Root 'runtime\dns-backup.json'));profile_present=((Test-Path -LiteralPath (Join-Path $Root 'private\selected-profile.json')) -or (Test-Path -LiteralPath (Join-Path $Root 'private\awg.conf')))}
 }
 
 Export-ModuleMember -Function *

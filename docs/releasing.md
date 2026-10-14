@@ -17,12 +17,14 @@
 3. Создайте и отправьте тег:
 
 ```powershell
-git tag -a v0.5.1 -m 'Mukhomor 0.5.1'
-git push origin v0.5.1
+git tag -a v0.7.2 -m 'Mukhomor 0.7.2'
+git push origin v0.7.2
 ```
 
 4. Workflow [release.yml](https://github.com/0nionow1/Mukhomor/blob/main/.github/workflows/release.yml) проверит версию, соберёт Windows и source ZIP, выполнит проверки публичных файлов и пакетов, загрузит четыре файла в **черновик** GitHub Release.
 5. Откройте черновик в Releases, проверьте заметки, SHA256 и установку на тестовой машине, затем опубликуйте.
+
+Стандартная сборка Actions использует закреплённый mihomo. Проверенные локальные артефакты Mycelium не входят в Git: для выпуска с этим ядром собирайте пакеты локально и прикладывайте оба архива вместе с SHA256 и соответствующими исходниками. Не заменяйте их стандартной сборкой без проверки состава.
 
 Сборка не требует личного VPN-профиля и секретов VPS. Для GitHub используется штатный краткоживущий `GITHUB_TOKEN` с правом записи contents только в release job. Не используйте реальный профиль в CI.
 
@@ -32,10 +34,10 @@ git push origin v0.5.1
 
 ```powershell
 .\Fetch-Dependencies.ps1
-.\Build-Release.ps1 -Version 0.5.0
+.\Build-Release.ps1 -Version 0.7.2
 .\tests\Run-Checks.ps1
 .\tests\Test-ReleasePrivacy.ps1
-.\tests\Test-ReleasePrivacy.ps1 -Archive .\dist\Mukhomor-0.5.0-source.zip
+.\tests\Test-ReleasePrivacy.ps1 -Archive .\dist\Mukhomor-0.7.2-source.zip
 ```
 
 В GitHub создайте релиз на соответствующем теге и приложите:
