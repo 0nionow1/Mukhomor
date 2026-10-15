@@ -42,6 +42,8 @@ $env:GOOS='android'
 $env:CARGO_NET_OFFLINE='false'
 $profile=if($DebugBuild){'debug'}else{'release'}
 $cargoTarget=if($env:CARGO_TARGET_DIR){[IO.Path]::GetFullPath($env:CARGO_TARGET_DIR)}else{Join-Path $root 'native\target'}
+$previousRustFlags=$env:CARGO_ENCODED_RUSTFLAGS
+$env:CARGO_ENCODED_RUSTFLAGS=@('-C','link-arg=-Wl,-z,max-page-size=16384',('--remap-path-prefix='+[IO.Path]::GetFullPath($root)+'=/project'),('--remap-path-prefix='+$env:USERPROFILE+'=/build-user')) -join [char]31
 Push-Location $root
 try {
     $prepare=@('Prepare-PortableCore.py','--go',$Go)
@@ -95,6 +97,7 @@ try {
     $apk=Join-Path $stage ('Mukhomor-'+$version+'-android'+$suffix+'.apk')
     Run (Join-Path $buildTools 'apksigner.bat') @('sign','--ks',$Keystore,'--ks-key-alias',$KeyAlias,'--ks-pass','env:MUKHOMOR_KEYSTORE_PASSWORD','--out',$apk,(Join-Path $stage 'aligned.apk'))
     Run (Join-Path $buildTools 'apksigner.bat') @('verify','--verbose',$apk)
+    Run $Python @('tests/Test-PortableReleasePrivacy.py','--archive',$apk)
     [IO.File]::WriteAllText(($apk+'.sha256'),((Get-FileHash -LiteralPath $apk -Algorithm SHA256).Hash.ToLowerInvariant()+'  '+[IO.Path]::GetFileName($apk)+"`n"))
     $source=Join-Path $stage ('Mukhomor-'+$version+'-android-source.zip')
     Run $Python @('Package-PortableSource.py','--platform','windows','--output',$source)
@@ -102,4 +105,4 @@ try {
     foreach($file in @($apk,($apk+'.sha256'),$source,($source+'.sha256'))){Copy-Item -LiteralPath $file -Destination $dist -Force}
     if(Test-Path -LiteralPath ($apk+'.idsig')){Copy-Item -LiteralPath ($apk+'.idsig') -Destination $dist -Force}
     Write-Host ('Android package: '+(Join-Path $dist ([IO.Path]::GetFileName($apk))))
-}finally{Pop-Location}
+}finally{Pop-Location;$env:CARGO_ENCODED_RUSTFLAGS=$previousRustFlags}

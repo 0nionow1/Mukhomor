@@ -44,6 +44,7 @@ android/src/org/mukhomor/app/MukhomorVpnService.java
 android/src/org/mukhomor/app/NativeBridge.java
 linux/install.sh linux/uninstall.sh linux/mukhomor.desktop linux/mukhomor.svg
 tests/linux-network.py tests/android-fixture.py tests/android-probe.c
+tests/Test-PortableReleasePrivacy.py
 Source/mihomo-v1.19.32-source.zip
 """.split()
 

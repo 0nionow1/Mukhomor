@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
-import { recommendedRelease } from '../analytics/content.mjs';
+import { compareVersions } from '../analytics/content.mjs';
 
 const root = new URL('../public/', import.meta.url);
 const escape = value => value.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -70,7 +70,7 @@ export async function syncSeo(checkOnly = false) {
   const app = {
     '@type': 'SoftwareApplication', '@id': `${base}#application`, name: 'Мухомор', alternateName: 'Mukhomor',
     url: base.href, description: faq[0].answer, applicationCategory: 'SecurityApplication',
-    operatingSystem: ['Windows 10/11 (x64)', 'Linux (x64)', 'Android 8.0+ (ARM64/x86_64)'], ...(recommendedRelease(content)?{softwareVersion:recommendedRelease(content).version}:{}),
+    operatingSystem: ['Windows 10/11 (x64)', 'Linux (x64)', 'Android 8.0+ (ARM64/x86_64)'], ...(content.releases.some(item=>item.visible)?{softwareVersion:content.releases.filter(item=>item.visible).sort((a,b)=>compareVersions(b.version,a.version))[0].version}:{}),
     downloadUrl: url('releases.html'), releaseNotes: url('changelog.html'),
     license: `${repo}/blob/main/LICENSE`, isAccessibleForFree: true, inLanguage: ['ru', 'en'],
     screenshot: url('assets/app-preview.png'), sameAs: [repo],

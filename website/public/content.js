@@ -56,7 +56,7 @@
       try {
         const value=JSON.parse(schema.textContent);
         for(const entity of value['@graph']||[]) {
-          if(entity['@type']==='SoftwareApplication') {if(recommended)entity.softwareVersion=recommended.version;else delete entity.softwareVersion;}
+          if(entity['@type']==='SoftwareApplication') {if(visible[0])entity.softwareVersion=visible[0].version;else delete entity.softwareVersion;}
           if(entity['@type']==='FAQPage') for(const [i,entry] of entity.mainEntity.entries()) {const section=document.querySelectorAll('.faq-answer')[i];if(section){entry.name=section.querySelector('h2').textContent;entry.acceptedAnswer.text=section.querySelector('p').textContent;}}
         }
         schema.textContent=JSON.stringify(value).replace(/</g,'\\u003c');

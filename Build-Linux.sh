@@ -14,6 +14,10 @@ prepare=()
 if [ "${MUKHOMOR_MYCELIA:-0}" = 1 ]; then prepare+=(--mycelia); fi
 python3 Prepare-PortableCore.py "${prepare[@]}"
 modfile="$repo/target/portable-core/linux/portable.mod"
+privacy_flags=("--remap-path-prefix=$repo=/project" "--remap-path-prefix=$HOME=/build-user" "--remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/cargo")
+export CARGO_ENCODED_RUSTFLAGS
+CARGO_ENCODED_RUSTFLAGS=$(printf '%s\037' "${privacy_flags[@]}")
+CARGO_ENCODED_RUSTFLAGS=${CARGO_ENCODED_RUSTFLAGS%$'\037'}
 cargo build --manifest-path native/Cargo.toml --locked --release --bin mukhomor
 go test -modfile="$modfile" -mod=readonly -tags=with_gvisor ./core ./cmd/mukhomor-controller
 go build -modfile="$modfile" -mod=readonly -tags=with_gvisor -trimpath -ldflags='-s -w' -o "$stage/mukhomor-controller" ./cmd/mukhomor-controller
@@ -31,6 +35,7 @@ if [ "${MUKHOMOR_MYCELIA:-0}" = 1 ]; then install -m644 target/portable-core/lin
 archive="$package_root/Mukhomor-$version-linux-$suffix.tar.gz"
 python3 Package-PortableSource.py --platform linux --output "$stage/Source/Mukhomor-source.zip"
 tar --owner=0 --group=0 -C "$(dirname "$stage")" -czf "$archive" "$(basename "$stage")"
+python3 tests/Test-PortableReleasePrivacy.py --archive "$archive"
 (cd "$package_root" && sha256sum "$(basename "$archive")" > "$(basename "$archive").sha256")
 install -m644 "$archive" "$output/$(basename "$archive").new"
 mv -f "$output/$(basename "$archive").new" "$output/$(basename "$archive")"

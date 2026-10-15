@@ -16,6 +16,15 @@ import zipfile
 ROOT = Path(__file__).resolve().parent
 PIN = "135f16d1e309f8c0ce2303c86fd38a38624a229e7185ceb74d1d3a4f0d4b66f1"
 
+def module_directory(directory):
+    # Go records replacement paths in the binary even with -trimpath.
+    # Relative replacements preserve provenance without the builder's home.
+    try:
+        relative = directory.resolve().relative_to(ROOT).as_posix()
+    except ValueError as error:
+        raise ValueError("Portable release core cache must stay inside the checkout") from error
+    return "./" + relative
+
 
 def unpack(archive, destination):
     with zipfile.ZipFile(archive) as source:
@@ -113,12 +122,12 @@ func tunNew(options tun.Options) (tun.Tun, error) {
 ''', newline="\n")
     mod = stage / "portable.mod"
     text = (ROOT / "go.mod").read_text()
-    text += f'\nreplace github.com/metacubex/mihomo => "{upstream.as_posix()}"\n'
+    text += f'\nreplace github.com/metacubex/mihomo => "{module_directory(upstream)}"\n'
     # Keep upstream's explicit protobuf replacement in the main module.
     text += "replace google.golang.org/protobuf => github.com/metacubex/protobuf-go v0.0.0-20260306035419-7ceee0674686\n"
     if args.mycelia:
-        text += f'replace github.com/0nionow1/mycelium => "{base.as_posix()}"\n'
-        text += f'replace github.com/metacubex/utls => "{(base / "third_party/utls").as_posix()}"\n'
+        text += f'replace github.com/0nionow1/mycelium => "{module_directory(base)}"\n'
+        text += f'replace github.com/metacubex/utls => "{module_directory(base / "third_party/utls")}"\n'
     mod.write_text(text, newline="\n")
     shutil.copyfile(ROOT / "go.sum", mod.with_suffix(".sum"))
     subprocess.run([args.go, "mod", "tidy", "-modfile=" + str(mod)], cwd=ROOT, check=True)

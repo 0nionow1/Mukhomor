@@ -216,6 +216,7 @@ installation.json
 !/docs/performance.md
 !/docs/platforms.md
 !/tests/linux-network.py
+!/tests/Test-PortableReleasePrivacy.py
 !/tests/Test-PublicSource.ps1
 !/tests/Run-Checks.ps1
 !/tests/Test-MyceliumImport.ps1

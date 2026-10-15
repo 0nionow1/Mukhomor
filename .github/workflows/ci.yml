@@ -105,6 +105,8 @@ jobs:
           persist-credentials: false
       - name: Public source boundary
         run: .\tests\Test-PublicSource.ps1
+      - name: Portable binary privacy regression tests
+        run: python tests/Test-PortableReleasePrivacy.py --self-test
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
           node-version: '24'

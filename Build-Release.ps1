@@ -93,6 +93,7 @@ Copy-Reviewed 'tests\Set-OwnedTestRoot.ps1' $source
 Copy-Reviewed 'tests\Test-SlintStartup.ps1' $source
 Copy-Reviewed 'tests\Test-Performance.ps1' $source
 Copy-Reviewed 'Build-All.ps1' $source
+Copy-Reviewed 'tests\Test-PortableReleasePrivacy.py' $source
 foreach($file in @('Build-Android.ps1','Build-Linux.sh','Prepare-PortableCore.py','Package-PortableSource.py','go.mod','go.sum','portable_assets.go','docs\platforms.md','tests\linux-network.py','tests\android-probe.c','tests\android-fixture.py','native\src\lib.rs','native\src\portable.rs','native\src\android.rs','core\controller.go','core\controller_test.go','core\import.go','core\node_fields.go','core\openvpn.go','core\rules.go','core\storage.go','core\update.go','cmd\mukhomor-android\bridge.c','cmd\mukhomor-android\main.go','cmd\mukhomor-controller\main.go','android\AndroidManifest.xml','android\res\drawable\ic_mushroom.xml','android\src\org\mukhomor\app\MainActivity.java','android\src\org\mukhomor\app\MukhomorVpnService.java','android\src\org\mukhomor\app\NativeBridge.java','linux\install.sh','linux\mukhomor.desktop','linux\mukhomor.svg','linux\uninstall.sh')){Copy-Reviewed $file $source}
 # Never scan or copy parent directories or user profiles. Only the explicit public allowlist above is packaged.
 foreach($file in @(
