@@ -5,6 +5,7 @@ use std::{
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
+#[cfg(windows)]
 use windows_sys::Win32::{
     Foundation::{
         ERROR_ACCESS_DENIED, ERROR_LOCK_VIOLATION, ERROR_SHARING_VIOLATION, GetLastError,
@@ -36,15 +37,34 @@ pub struct Locale {
     pub design: crate::design::Design,
     system: Language,
     path: PathBuf,
+    writer: Option<PreferenceWriter>,
+}
+
+struct PreferenceWriter {
+    input: Option<std::sync::mpsc::Sender<(Language, crate::design::Design)>>,
+    output: std::sync::mpsc::Receiver<Result<(), String>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+impl Drop for PreferenceWriter {
+    fn drop(&mut self) {
+        self.input.take();
+        // Finish the final atomic write when the GUI exits.
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
 }
 
 impl Locale {
     pub fn new(root: &Path, smoke: bool) -> Result<Self, String> {
+        #[cfg(windows)]
         let directory = if smoke {
             root.join("runtime")
         } else {
             crate::setup::folder(CSIDL_LOCAL_APPDATA)?.join("Mukhomor")
         };
+        #[cfg(not(windows))]
+        let directory = { let _ = smoke; root.to_path_buf() };
         let path = directory.join("ui-preferences.json");
         let value = std::fs::File::open(&path)
             .ok()
@@ -65,9 +85,47 @@ impl Locale {
         Ok(Self {
             preference,
             design,
-            system: system_language(unsafe { GetUserDefaultUILanguage() }),
+            system: detected_language(),
             path,
+            writer: None,
         })
+    }
+
+    pub fn enable_background_saves(&mut self) {
+        if self.writer.is_some() {
+            return;
+        }
+        let storage = Self {
+            preference: self.preference,
+            design: self.design,
+            system: self.system,
+            path: self.path.clone(),
+            writer: None,
+        };
+        let (input, requests) = std::sync::mpsc::channel::<(Language, crate::design::Design)>();
+        let (results, output) = std::sync::mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            while let Ok(mut latest) = requests.recv() {
+                while let Ok(next) = requests.try_recv() {
+                    latest = next;
+                }
+                let _ = results.send(storage.save(latest.0, latest.1));
+            }
+        });
+        self.writer = Some(PreferenceWriter {
+            input: Some(input),
+            output,
+            thread: Some(thread),
+        });
+    }
+
+    pub fn saved_result(&self) -> Option<Result<(), String>> {
+        let writer = self.writer.as_ref()?;
+        let mut latest = None;
+        while let Ok(result) = writer.output.try_recv() {
+            latest = Some(result);
+        }
+        latest
     }
 
     pub fn language(&self) -> Language {
@@ -101,6 +159,14 @@ impl Locale {
     }
 
     fn save(&self, language: Language, design: crate::design::Design) -> Result<(), String> {
+        if let Some(writer) = &self.writer {
+            return writer
+                .input
+                .as_ref()
+                .unwrap()
+                .send((language, design))
+                .map_err(|_| "Не удалось сохранить настройки интерфейса".into());
+        }
         static SERIAL: AtomicU64 = AtomicU64::new(0);
         let parent = self.path.parent().ok_or("No preference directory")?;
         std::fs::create_dir_all(parent).map_err(|_| "Не удалось сохранить настройки интерфейса")?;
@@ -163,6 +229,13 @@ impl Locale {
 
     /// Translate presentation only. The original errors and IPC payloads stay intact.
     pub fn error<'a>(&self, source: &'a str) -> Cow<'a, str> {
+        if source == "Cannot reach the local Mukhomor service. Retrying…" {
+            return Cow::Borrowed(if self.effective() == Language::Russian {
+                "Нет связи со службой Mukhomor. Пробуем снова…"
+            } else {
+                source
+            });
+        }
         if source == "Invalid Mukhomor preset file" {
             return Cow::Borrowed(if self.effective() == Language::English {
                 "Invalid Mukhomor preset file"
@@ -322,6 +395,7 @@ impl Locale {
     }
 }
 
+#[cfg(windows)]
 fn retryable_replace_error(code: u32) -> bool {
     matches!(
         code,
@@ -329,6 +403,7 @@ fn retryable_replace_error(code: u32) -> bool {
     )
 }
 
+#[cfg(windows)]
 fn replace_preference(temporary: &Path, destination: &Path) -> Result<(), String> {
     let source = crate::platform::wide(&temporary.to_string_lossy());
     let target = crate::platform::wide(&destination.to_string_lossy());
@@ -358,6 +433,18 @@ fn replace_preference(temporary: &Path, destination: &Path) -> Result<(), String
     Err("Не удалось сохранить настройки интерфейса".into())
 }
 
+#[cfg(not(windows))]
+fn replace_preference(temporary: &Path, destination: &Path) -> Result<(), String> {
+    std::fs::rename(temporary, destination).map_err(|e| e.to_string())
+}
+fn detected_language() -> Language {
+    #[cfg(windows)]
+    { system_language(unsafe { GetUserDefaultUILanguage() }) }
+    #[cfg(target_os = "android")]
+    { if crate::android::call("language", "").unwrap_or_default().starts_with("ru") { Language::Russian } else { Language::English } }
+    #[cfg(target_os = "linux")]
+    { if std::env::var("LANG").unwrap_or_default().starts_with("ru") { Language::Russian } else { Language::English } }
+}
 fn system_language(language_id: u16) -> Language {
     if language_id & 0x03ff == 0x0019 {
         Language::Russian
@@ -367,6 +454,99 @@ fn system_language(language_id: u16) -> Language {
 }
 
 const TEXT: &[(&str, &str)] = &[
+    ("Системные настройки VPN", "System VPN settings"),
+    ("VPN продолжает работать в фоне. Отключить его можно здесь или в уведомлении.", "VPN stays connected in the background. Disconnect here or from the notification."),
+    ("Системный трей недоступен. Закрытие окна отключает VPN и завершает приложение.", "System tray is unavailable. Closing the window disconnects VPN and exits the app."),
+    ("Свернуть", "Minimize"),
+    ("Запуск при входе в Linux", "Start when signing in to Linux"),
+    ("Запускать приложение при входе в систему. Автоподключение VPN настраивается отдельно.", "Start the app at sign-in. VPN auto-connect is a separate setting."),
+    ("Постоянный VPN", "Always-on VPN"),
+    ("Постоянный VPN и блокировка соединений без VPN включаются в системных настройках Android.", "Enable always-on VPN and block connections without VPN in Android system settings."),
+
+    ("Списки правил обновлены", "Rule lists updated"),
+    ("Не сохранено", "Unsaved"),
+    ("Несохранённые изменения", "Unsaved changes"),
+    (
+        "Сохранить изменения перед выходом?",
+        "Save your changes before exiting?",
+    ),
+    ("Сохранить и выйти", "Save and exit"),
+    ("Выйти без сохранения", "Exit without saving"),
+    ("IP и подсети", "IP addresses and subnets"),
+    ("Восстановить правила шаблона", "Restore template rules"),
+    (
+        "Вставьте конфигурацию или выберите файл",
+        "Paste a configuration or choose a file",
+    ),
+    ("Выбрать файл", "Choose file"),
+    ("Выход", "Exit"),
+    ("Добавить из шаблона", "Add from template"),
+    (
+        "Добавьте конфигурацию сервера",
+        "Add a server configuration",
+    ),
+    ("Доступ к локальной сети", "Local network access"),
+    ("Есть несохранённые изменения", "You have unsaved changes"),
+    (
+        "Из файла или текста конфигурации",
+        "From a file or configuration text",
+    ),
+    ("Набор правил", "Rule preset"),
+    ("О приложении", "About"),
+    ("Отключить VPN и выйти", "Disconnect VPN and exit"),
+    ("Правила маршрутизации", "Routing rules"),
+    ("Результаты проверки", "Validation results"),
+    ("Серверы", "Servers"),
+    ("СЕРВЕРЫ", "SERVERS"),
+    ("Готовый", "Template"),
+    ("Эффекты", "Effects"),
+    ("Анимация", "Animation"),
+    ("Название", "Name"),
+    ("Экспортировать", "Export"),
+    ("Скругления", "Rounded corners"),
+    ("Трафик защищён", "Traffic is protected"),
+    (
+        "Удаление конфигурации нельзя отменить",
+        "Deleting a configuration cannot be undone",
+    ),
+    ("Удалить конфигурацию", "Delete configuration"),
+    ("Удалить конфигурацию?", "Delete this configuration?"),
+    ("Удалить набор", "Delete preset"),
+    ("Удалить набор правил?", "Delete this rule preset?"),
+    ("Этот раздел включён", "Enable this section"),
+    ("Личные правила", "Personal rules"),
+    ("Ошибок не найдено", "No issues found"),
+    (
+        "Сначала сохраните изменения и дождитесь завершения операции",
+        "Save your changes and wait for the current operation to finish",
+    ),
+    ("Подключено", "Connected"),
+    ("Не подключено", "Disconnected"),
+    ("Подключаемся…", "Connecting…"),
+    ("Загружаем состояние…", "Loading status…"),
+    ("Загружаем профили и правила…", "Loading profiles and rules…"),
+    ("Подготавливаем VPN…", "Preparing VPN…"),
+    ("Не удалось подготовить приложение", "Could not prepare the app"),
+    ("Подготовка занимает больше времени. Можно повторить проверку или открыть приложение.", "Preparation is taking longer. Retry the check or open the app."),
+    ("Повторить", "Retry"),
+    ("Открыть приложение", "Open the app"),
+    ("Открыть", "Open"),
+    (
+        "Состояние соединения неизвестно",
+        "Connection status is unknown",
+    ),
+    ("Требуется восстановление сети", "Network recovery required"),
+    ("Название сохранено", "Name saved"),
+    ("Конфигурация удалена", "Configuration deleted"),
+    (
+        "У этого набора нет исходного шаблона",
+        "This preset has no original template",
+    ),
+    (
+        "Название должно содержать от 1 до 120 символов",
+        "Enter a name between 1 and 120 characters",
+    ),
+    ("Описание слишком длинное", "Description is too long"),
     ("Оформление", "Appearance"),
     ("Сбросить оформление", "Reset appearance"),
     (
@@ -1349,6 +1529,24 @@ fn import_error_russian(reason: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn slint_labels_have_translations_and_keys_are_unique() {
+        let mut keys = std::collections::BTreeSet::new();
+        for &(source, _) in TEXT {
+            assert!(keys.insert(source), "Duplicate translation: {source}");
+        }
+        for tail in include_str!("../../ui/views/app.slint")
+            .split("I18n.tr(\"")
+            .skip(1)
+        {
+            let literal = tail.split('"').next().unwrap();
+            let source: String = serde_json::from_str(&format!("\"{literal}\"")).unwrap();
+            assert!(
+                keys.contains(source.as_str()),
+                "Missing Slint translation: {source}"
+            );
+        }
+    }
 
     #[test]
     fn windows_language_selection() {
@@ -1366,6 +1564,7 @@ mod tests {
             preference: Language::Auto,
             system: Language::English,
             path: PathBuf::new(),
+            writer: None,
         };
         assert_eq!(locale.text("Подключиться"), "Connect");
         assert_eq!(locale.text("ТВОИ СЕРВЕРЫ · 12"), "YOUR SERVERS · 12");
@@ -1384,6 +1583,7 @@ mod tests {
             preference: Language::Russian,
             system: Language::English,
             path: PathBuf::new(),
+            writer: None,
         };
         let module = include_str!("../../ProfileImport.psm1");
         let mut messages = std::collections::HashSet::new();
@@ -1418,6 +1618,7 @@ mod tests {
             preference: Language::English,
             system: Language::Russian,
             path: PathBuf::new(),
+            writer: None,
         };
         assert_eq!(locale.text("Добавлено: 12"), "Added: 12");
         assert_eq!(locale.text("Импортировать"), "Import");
@@ -1449,6 +1650,7 @@ mod tests {
             preference: Language::English,
             system: Language::Russian,
             path: PathBuf::new(),
+            writer: None,
         };
         let raw = "Подключение отменено";
         assert_eq!(locale.error(raw), "Connection cancelled");
@@ -1483,6 +1685,7 @@ mod tests {
             preference: Language::English,
             system: Language::Russian,
             path: PathBuf::new(),
+            writer: None,
         };
         let errors = [
             "Синтетическая неизвестная ошибка Windows · fixture.example",
@@ -1556,7 +1759,7 @@ mod tests {
             );
             std::fs::write(&locale.path, vec![b' '; 4097]).unwrap();
             assert_eq!(Locale::new(&root, true).unwrap().language(), Language::Auto);
-            let files: Vec<_> = std::fs::read_dir(root.join("runtime")).unwrap().collect();
+            let files: Vec<_> = std::fs::read_dir(locale.path.parent().unwrap()).unwrap().collect();
             assert_eq!(files.len(), 1);
         };
         let tested = std::panic::catch_unwind(result);
@@ -1565,8 +1768,52 @@ mod tests {
     }
 
     #[test]
+    fn background_preferences_flush_latest_value_and_report_write_errors() {
+        let root = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join(format!("locale-async-{}", std::process::id()));
+        let tested = std::panic::catch_unwind(|| {
+            let mut locale = Locale::new(&root, true).unwrap();
+            locale.enable_background_saves();
+            for i in 0..40 {
+                locale
+                    .set_language(if i % 2 == 0 {
+                        Language::Russian
+                    } else {
+                        Language::English
+                    })
+                    .unwrap();
+            }
+            assert_eq!(locale.language(), Language::English);
+            drop(locale);
+            assert_eq!(
+                Locale::new(&root, true).unwrap().language(),
+                Language::English
+            );
+            let mut broken = Locale::new(&root.join("blocked"), true).unwrap();
+            std::fs::write(root.join("blocked"), b"directory blocked by fixture file").unwrap();
+            broken.enable_background_saves();
+            broken.set_language(Language::Russian).unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            loop {
+                if let Some(result) = broken.saved_result() {
+                    assert!(result.is_err());
+                    break;
+                }
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+        });
+        let _ = std::fs::remove_dir_all(root);
+        tested.unwrap();
+    }
+
+    #[test]
+    #[cfg(windows)]
     fn preference_replacement_handles_transient_lock_and_bounds_permanent_failure() {
-        use windows_sys::Win32::{
+        #[cfg(windows)]
+use windows_sys::Win32::{
             Foundation::{CloseHandle, INVALID_HANDLE_VALUE},
             Storage::FileSystem::{
                 CreateFileW, FILE_GENERIC_READ, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,

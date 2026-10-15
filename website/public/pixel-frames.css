@@ -1,0 +1,191 @@
+/* Pixel mycelium: 4px roots, fixed corner tiles, repeated branching edges.
+   All decoration stays inside its own band, clear of text and keyboard focus. */
+:root {
+  --frame-panel: url('assets/pixel-frame-panel.svg');
+  --frame-quiet: url('assets/pixel-frame-quiet.svg');
+  --frame-pink: url('assets/pixel-frame-pink.svg');
+  --frame-action: url('assets/pixel-frame-action-compact.svg');
+  --frame-control: url('assets/pixel-frame-quiet-compact.svg');
+  --frame-control-active: url('assets/pixel-frame-pink-compact.svg');
+  --frame-secondary: url('assets/pixel-frame-panel-compact.svg');
+  --frame-signal: url('assets/pixel-frame-signal-compact.svg');
+  --frame-pressed: url('assets/pixel-frame-pressed-compact.svg');
+  --frame-edge-mask: url('assets/pixel-frame-edge-mask.svg');
+  --mycelium-rule: url('assets/pixel-mycelium-rule.svg');
+  --mycelium-rule-compact: url('assets/pixel-mycelium-rule-compact.svg');
+  --root-signal: linear-gradient(90deg, transparent 0 16px, #35584f 16px 32px, #299b87 32px 48px, #16f5d1 48px 56px, transparent 56px);
+}
+
+/* Roots follow the perimeter; their branches keep their size on long edges. */
+:is(.routing-demo, .start-section, .code-block, .protocol-callout,
+    .download-release, .preview-dialog, .analytics-consent, .analytics-challenge,
+    .doc-callout, .status, .github-link, .copy-button) {
+  border: 2px solid transparent;
+  border-image: var(--frame-panel) 24 fill / 24px / 8px repeat;
+  background: transparent;
+  box-shadow: none;
+}
+:is(.github-link, .copy-button, .preview-dialog, .analytics-consent, .analytics-challenge) {
+  border-image-source: var(--frame-quiet);
+}
+:is(.recommended-release, .doc-callout) { border-image-source: var(--frame-pink); }
+.status, .github-link, .copy-button { border-image: var(--frame-control) 16 fill / 16px / 4px repeat; }
+.status { padding: 10px 13px; }
+.copy-button { padding: 10px 14px; }
+.github-link { padding-block: 12px; }
+.testing-status, .available-status { border-image-source: var(--frame-control-active); }
+.github-link:is(:hover, :focus-visible), .copy-button:is(:hover, :focus-visible) {
+  border-image-source: var(--frame-signal); color: var(--mint);
+}
+.analytics-challenge { padding: 16px; }
+
+/* Actions have the same root silhouette; outlines remain outside the frame. */
+.button, .enter-button {
+  border: 2px solid transparent;
+  border-image: var(--frame-action) 16 fill / 16px / 0 repeat;
+  background: transparent;
+  color: var(--ink);
+  clip-path: none;
+  box-shadow: none;
+}
+.button-secondary { border-image-source: var(--frame-secondary); }
+.button:not([aria-disabled="true"]):is(:hover, :focus-visible), .enter-button:is(:hover, :focus-visible) {
+  border-image-source: var(--frame-signal); background: transparent; color: var(--mint); filter: none;
+}
+.button:not([aria-disabled="true"]):active, .enter-button:active {
+  border-image-source: var(--frame-pressed); color: #10241f;
+}
+.analytics-actions .button-secondary:hover { background: transparent; }
+.release-file[aria-disabled="true"] { border-image-source: var(--frame-secondary); background: transparent; filter: none; }
+:focus-visible { outline: 2px dashed var(--mint); outline-offset: 6px; }
+
+/* Coarse, asymmetric branches replace the long straight section dividers. */
+:is(.principles, .feature-notes, .ecosystem, .connection-option, .docs-layout,
+    .sidebar-note, .doc-details, .doc-details:last-of-type, .doc-next,
+    .release-list, .release-entry, .faq-answer, .policy-copy section,
+    .site-footer, .footer-bottom, .scenario-tabs, .diagram-topline),
+body:not(.landing-page) > .site-header {
+  position: relative;
+  border-color: transparent;
+}
+.docs-page .site-footer { border-top-color: transparent; }
+:is(.principles, .feature-notes, .ecosystem, .docs-layout, .sidebar-note,
+    .doc-details, .doc-next, .release-list, .faq-answer, .policy-copy section,
+    .site-footer, .footer-bottom)::before,
+:is(.principles, .connection-option, :where(.doc-details:last-of-type),
+    .release-entry, .scenario-tabs, .diagram-topline)::after,
+body:not(.landing-page) > .site-header::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; height: 48px;
+  background: var(--mycelium-rule) left center / 320px 48px repeat-x;
+  pointer-events: none;
+}
+:is(.principles, .feature-notes, .ecosystem, .docs-layout, .sidebar-note,
+    .doc-details, .doc-next, .release-list, .faq-answer, .policy-copy section,
+    .site-footer, .footer-bottom)::before { top: -24px; }
+:is(.principles, .connection-option, :where(.doc-details:last-of-type),
+    .release-entry, .scenario-tabs, .diagram-topline)::after,
+body:not(.landing-page) > .site-header::after { bottom: -24px; }
+.diagram-topline::after, .scenario-tabs::after {
+  background-image: var(--mycelium-rule-compact);
+  background-size: 320px 16px; height: 16px; bottom: -8px;
+}
+.diagram-topline::after { left: 16px; right: 16px; }
+.footer-bottom::before { opacity: .65; }
+/* The lower roots extend 24px beyond each article; reserve room for badges. */
+.connection-option { padding-block: 32px; }
+.doc-details summary { padding-block: 26px; }
+.doc-details summary::after { top: 23px; }
+/* Adjacent blocks share the preceding frame's edge instead of drawing two. */
+.doc-callout + .doc-details { border-top: 0; }
+.doc-callout + .doc-details::before,
+.doc-details + .doc-next::before { content: none; }
+.doc-callout + .doc-details > summary { padding-top: 8px; }
+.doc-callout + .doc-details > summary::after { top: 5px; }
+.doc-details + .doc-next { border-top: 0; margin-top: 24px; padding-top: 12px; }
+.doc-details[open]:has(> div > .code-block + .copy-feedback:last-child)::after { content: none; }
+.doc-details[open]:has(> div > .code-block + .copy-feedback:last-child) + .doc-next { margin-top: 8px; }
+
+/* The selected tab highlights a short root, rather than a solid underline. */
+.scenario-tabs button { position: relative; border-color: transparent; }
+.scenario-tabs button[aria-selected="true"] { border-color: transparent; }
+.scenario-tabs button[aria-selected="true"]::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: -8px; height: 16px;
+  background: #86556e; z-index: 1; pointer-events: none;
+  mask: var(--mycelium-rule-compact) left center / 320px 16px repeat-x;
+}
+.scenario-tabs button:is(:hover, :focus-visible) { color: var(--mint); }
+
+/* Only the server requirement and the recommended release receive rare pulses. */
+.connection-option.available.is-visible::after {
+  background-image: var(--root-signal), var(--mycelium-rule);
+  background-size: 80px 100%, 320px 48px;
+  background-position: -80px center, left center;
+  background-repeat: no-repeat, repeat-x;
+  mask: var(--mycelium-rule) left center / 320px 48px repeat-x;
+  animation: root-signal 14s steps(120, end) 2s infinite;
+}
+.recommended-release::before {
+  content: ''; position: absolute; top: -10px; left: 14px; right: 14px; height: 24px;
+  background: var(--root-signal) -80px center / 80px 100% no-repeat;
+  mask: var(--frame-edge-mask) center / 272px 24px repeat-x;
+  pointer-events: none;
+  animation: root-signal 14s steps(120, end) 3s infinite;
+}
+@keyframes root-signal {
+  0% { background-position: -80px center, left center; }
+  24%, 100% { background-position: calc(100% + 80px) center, left center; }
+}
+.motion-paused .connection-option.available.is-visible::after,
+.motion-paused .recommended-release::before { animation: none; background-position: -80px center, left center; }
+@media (prefers-reduced-motion: reduce) {
+  .connection-option.available.is-visible::after,
+  .recommended-release::before { animation: none; background-position: -80px center, left center; }
+}
+.docs-sidebar nav a { border: 2px solid transparent; }
+.docs-sidebar nav a[aria-current="location"] {
+  border-color: transparent; background: transparent;
+  border-image: var(--frame-control-active) 16 fill / 16px / 4px repeat;
+}
+.docs-sidebar nav a:is(:hover, :focus-visible) { color: var(--mint); }
+
+/* Table rows and diagram connectors keep their reading/flow direction. */
+table { border-collapse: separate; border-spacing: 0; }
+td, th {
+  border-bottom-color: transparent;
+  background-image: var(--mycelium-rule-compact);
+  background-size: 320px 16px; background-position: left bottom; background-repeat: repeat-x;
+}
+.route-branch { border: 0; }
+.route-branch:first-child, .route-branch:last-child { border-image: none; }
+.route-branch::after {
+  content: ''; position: absolute; top: -10px; width: 50%; height: 16px;
+  background: var(--mycelium-rule-compact) left center / 320px 16px repeat-x;
+  pointer-events: none;
+}
+.route-branch:first-child::after { left: 50%; }
+.route-branch:last-child::after { right: 50%; transform: scaleX(-1); }
+.route-branch:first-child::before, .route-line { width: 4px; background: #694456; }
+.route-branch:first-child::before { right: -2px; }
+.route-line::after { width: 8px; height: 8px; background: #86556e; }
+
+/* The hero keeps its transparent navbar and restrained corner marks. */
+.scene-frame i { width: 32px; height: 32px; border: 0; background: url('assets/pixel-corner.svg') center / 32px 32px no-repeat; }
+.scene-frame i:nth-child(2) { transform: rotate(90deg); }
+.scene-frame i:nth-child(3) { transform: rotate(270deg); }
+.scene-frame i:nth-child(4) { transform: rotate(180deg); }
+@media (max-width: 800px) {
+  .docs-sidebar nav a { border-image: var(--frame-control) 16 fill / 16px / 4px repeat; }
+  .docs-sidebar nav a[aria-current="location"] { border-image-source: var(--frame-control-active); }
+}
+@media (max-width: 600px) {
+  .github-link { border: 0; border-image: none; }
+}
+@media (forced-colors: active) {
+  :is(.button, .enter-button, .routing-demo, .start-section, .code-block,
+      .protocol-callout, .download-release, .preview-dialog, .analytics-consent,
+      .analytics-challenge, .doc-callout, .status, .github-link, .copy-button,
+      .docs-sidebar nav a) { border-image: none; border-color: ButtonText; background: Canvas; }
+  :focus-visible { outline-color: Highlight; }
+}

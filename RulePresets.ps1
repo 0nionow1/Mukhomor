@@ -1,14 +1,19 @@
 # Shared saved model and runtime projection. Dot-sourced by SplitVpn.psm1.
 $script:PresetRuleKeys=@('process_names','process_paths','domains','domain_suffixes','ip_cidrs','rule_set_exclusions')
+$script:ProjectionCache=@{}
+$script:ProjectionVersion=$null
+$script:BundledPresets=$null
 
 function Get-BundledRulePresets {
+    if($null -ne $script:BundledPresets){return ,(Convert-ToMap $script:BundledPresets)}
     $defaults=Read-JsonFile (Join-Path $PSScriptRoot 'assets\settings.default.json')
     $presets=Convert-ToMap $defaults.presets
+    $script:BundledPresets=Convert-ToMap $presets
     return ,$presets
 }
 
-function Convert-RuleSettings($Settings) {
-    $s=Convert-ToMap $Settings
+function Convert-RuleSettings($Settings,[switch]$Owned) {
+    $s=if($Owned){$Settings}else{Convert-ToMap $Settings}
     if ($s.schema -eq 1) {
         # Partition only the rules actually present: never resurrect a user's deletions.
         $presets=New-Object 'Collections.Generic.List[object]'
@@ -80,12 +85,67 @@ function Convert-PresetRule([string]$Section,[string]$Value) {
     throw 'Unknown rule section'
 }
 
+function Convert-SplitCanonicalValue($Value) {
+    if($Value -is [System.Collections.IDictionary]) {
+        $result=[ordered]@{}
+        foreach($key in @($Value.Keys | Sort-Object -CaseSensitive)) {$result[$key]=Convert-SplitCanonicalValue $Value[$key]}
+        return $result
+    }
+    if($Value -is [array]) {
+        $result=[object[]]::new($Value.Count)
+        for($i=0;$i -lt $Value.Count;$i++) {
+            $item=$Value[$i]
+            $result[$i]=if($item -is [System.Collections.IDictionary] -or $item -is [array]) {Convert-SplitCanonicalValue $item}else{$item}
+        }
+        return ,$result
+    }
+    return $Value
+}
+function Get-SplitTextHash([string]$Text) {
+    $hash=[Security.Cryptography.SHA256]::Create()
+    try {return [Convert]::ToBase64String($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($Text)))}finally{$hash.Dispose()}
+}
 function Get-RuleSettingsProjection($Settings) {
+    if($null -eq $script:ProjectionVersion) {
+        $script:ProjectionVersion='projection-v1:'+((@('RulePresets.ps1','RuleNormalizer.cs','SplitVpn.psm1','assets\settings.default.json') | ForEach-Object {(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot $_)).Hash}) -join ':')
+    }
+    $key=Get-SplitTextHash ($script:ProjectionVersion+(Convert-SplitCanonicalValue $Settings | ConvertTo-Json -Depth 40 -Compress))
+    if($script:ProjectionCache.ContainsKey($key)){return Convert-ToMap $script:ProjectionCache[$key]}
+    $cachePath=if($env:MUKHOMOR_STATE_ROOT){Join-Path $env:MUKHOMOR_STATE_ROOT 'runtime\rule-projection-cache.json'}else{''}
+    if($cachePath) {
+        try {
+            $item=Get-Item -LiteralPath $cachePath -ErrorAction Stop
+            if($item.Length -le 16777216 -and !($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                $cache=Read-JsonFile $cachePath
+                if($cache.schema -eq 1 -and $cache.key -ceq $key -and $cache.payload -is [string] -and (Get-SplitTextHash $cache.payload) -ceq $cache.hash) {
+                    $projection=Convert-ToMap ($cache.payload | ConvertFrom-Json)
+                    if($projection.settings -is [hashtable] -and $projection.issues -is [array]) {
+                        $script:ProjectionCache.Clear();$script:ProjectionCache[$key]=$projection
+                        return Convert-ToMap $projection
+                    }
+                }
+            }
+        } catch {} # A missing or damaged performance cache is always rebuilt.
+    }
+    $projection=New-RuleSettingsProjection $Settings
+    $script:ProjectionCache.Clear();$script:ProjectionCache[$key]=Convert-ToMap $projection
+    if($cachePath) {
+        try {
+            $payload=$projection | ConvertTo-Json -Depth 40 -Compress
+            if([Text.Encoding]::UTF8.GetByteCount($payload) -le 8388608) {Write-AtomicJson $cachePath @{schema=1;key=$key;payload=$payload;hash=(Get-SplitTextHash $payload)}}
+        } catch {} # Caching must not turn a valid operation into a failure.
+    }
+    return $projection
+}
+function New-RuleSettingsProjection($Settings) {
     # Never write this projection back to settings.json: saved lists keep ownership and raw text.
     $s=Convert-ToMap $Settings
     $direct=@{domain_rule_sets=@()};$issues=New-Object 'Collections.Generic.List[object]'
     $seen=@{};$buffers=@{};$exclusionOrigins=@{};foreach ($key in $script:PresetRuleKeys) {$buffers[$key]=New-Object 'Collections.Generic.List[string]';$seen[$key]=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)}
     $owners=@($s.presets)+@(@{id='';name='';enabled=$true;disabled_sections=@();rules=$s.direct;domain_rule_sets=$s.direct.domain_rule_sets})
+    $ruleCount=0;foreach($owner in $owners){foreach($key in $script:PresetRuleKeys){$ruleCount+=$owner.rules[$key].Count}}
+    $fastNormalizer=$null -ne ('MukhomorRuleNormalizer' -as [type])
+    if(!$fastNormalizer -and $ruleCount -gt 512) {Add-Type -Path (Join-Path $PSScriptRoot 'RuleNormalizer.cs');$fastNormalizer=$true}
     $catalog=Get-DomainRuleSetCatalog
     foreach ($p in $owners) {
         foreach ($key in $script:PresetRuleKeys) {
@@ -93,7 +153,7 @@ function Get-RuleSettingsProjection($Settings) {
             foreach ($raw in $p.rules[$key]) {
                 $line++
                 try {
-                    $rule=Convert-PresetRule $key $raw
+                    $rule=if($fastNormalizer){[MukhomorRuleNormalizer]::Convert($key,$raw)}else{Convert-PresetRule $key $raw}
                     if ($active) {
                         if ($seen[$key].Add($rule)) {
                             $buffers[$key].Add($rule)
@@ -101,7 +161,10 @@ function Get-RuleSettingsProjection($Settings) {
                         }
                         else {$issues.Add(@{preset_id=$p.id;section=$key;line=$line;value=$raw;code='duplicate';message='Rule duplicates another active entry'})}
                     }
-                } catch {$issues.Add(@{preset_id=$p.id;section=$key;line=$line;value=$raw;code='invalid_rule';message=$_.Exception.Message})}
+                } catch {
+                    $message=if($fastNormalizer -and $_.Exception.InnerException){$_.Exception.InnerException.Message}else{$_.Exception.Message}
+                    $issues.Add(@{preset_id=$p.id;section=$key;line=$line;value=$raw;code='invalid_rule';message=$message})
+                }
             }
         }
         $line=0
@@ -114,7 +177,7 @@ function Get-RuleSettingsProjection($Settings) {
     foreach ($key in $script:PresetRuleKeys) {$direct[$key]=@($buffers[$key].ToArray())}
     $s.direct=$direct
     # IP provider ordering remains most-specific first as in schema 1.
-    $s.direct.ip_cidrs=@($s.direct.ip_cidrs | Sort-Object {Get-CidrSortKey $_})
+    $s.direct.ip_cidrs=@(if($fastNormalizer){[MukhomorRuleNormalizer]::SortCidrs([string[]]$s.direct.ip_cidrs)}else{$s.direct.ip_cidrs | Sort-Object {Get-CidrSortKey $_}})
     foreach ($domain in $s.direct.rule_set_exclusions) {
         # Reuse the normalized sets: walking the domain's label ancestors avoids
         # scanning every suffix for every exception (up to 30000 saved rules).

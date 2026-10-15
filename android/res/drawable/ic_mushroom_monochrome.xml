@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Same MINI mark; transparent spots stay visible when Android applies a tint. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <group android:scaleX="3" android:scaleY="3" android:translateX="18" android:translateY="21">
+        <path android:fillColor="#FFFFFF" android:pathData="M9,4h6v1H9zM7,5h10v1H7zM5,6h2v1H5zM10,6h9v1H10zM4,7h3v1H4zM10,7h10v1H10zM3,8h9v1H3zM17,8h4v1H17zM3,9h1v1H3zM7,9h5v1H7zM17,9h4v1H17zM3,10h1v1H3zM7,10h5v1H7zM16,10h5v1H16zM3,11h18v1H3zM9,12h6v1H9zM9,13h6v1H9zM9,14h6v1H9zM8,15h8v1H8zM7,16h10v1H7zM7,17h10v1H7z" />
+    </group>
+</vector>

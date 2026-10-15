@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Mukhomor
+Comment=VPN with gaming split routing
+Exec=/opt/mukhomor/mukhomor
+Icon=mukhomor
+Terminal=false
+Categories=Network;Security;
+StartupNotify=true

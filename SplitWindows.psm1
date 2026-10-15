@@ -64,8 +64,9 @@ function Set-SessionDns([string]$Root) {
     if (Test-Path -LiteralPath $snapshotPath) { throw 'A previous DNS snapshot exists. Run STOP.cmd to recover it first.' }
     $adapters=@(Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and $_.Name -ne 'Mukhomor' })
     $rows=@()
+    $defaultRoutes=@(Get-NetRoute -ErrorAction SilentlyContinue | Where-Object { $_.DestinationPrefix -in @('0.0.0.0/0','::/0') })
     foreach ($adapter in $adapters) {
-        $routes=@(Get-NetRoute -InterfaceIndex $adapter.ifIndex -ErrorAction SilentlyContinue | Where-Object { $_.DestinationPrefix -in @('0.0.0.0/0','::/0') })
+        $routes=@($defaultRoutes | Where-Object { $_.InterfaceIndex -eq $adapter.ifIndex })
         if (!$routes.Count) { continue }
         $guid=([guid]$adapter.InterfaceGuid).ToString('B')
         foreach ($family in @('ipv4','ipv6')) {
@@ -74,7 +75,7 @@ function Set-SessionDns([string]$Root) {
             $item=Get-ItemProperty -LiteralPath $registry -ErrorAction SilentlyContinue
             $manual=if ($item -and $item.PSObject.Properties.Name -contains 'NameServer') { [string]$item.NameServer } else { '' }
             $servers=@($manual -split '[,;\s]+' | Where-Object { $_ })
-            $rows+=@(@{guid=$guid;name=$adapter.Name;family=$family;source=$(if ($servers.Count) { 'static' } else { 'dhcp' });servers=$servers})
+            $rows+=@(@{guid=$guid;index=$adapter.ifIndex;name=$adapter.Name;family=$family;source=$(if ($servers.Count) { 'static' } else { 'dhcp' });servers=$servers})
         }
     }
     if (!$rows.Count) { throw 'No active default network adapter was found' }
@@ -84,7 +85,7 @@ function Set-SessionDns([string]$Root) {
         foreach ($row in $rows) {
             Assert-SplitNotCancelled $Root
             if ($clock.ElapsedMilliseconds -ge 15000) { throw 'DNS setup deadline exceeded' }
-            $adapter=Get-NetAdapter | Where-Object { ([guid]$_.InterfaceGuid).ToString('B') -eq $row.guid } | Select-Object -First 1
+            $adapter=Get-NetAdapter -InterfaceIndex $row.index -ErrorAction SilentlyContinue | Where-Object { ([guid]$_.InterfaceGuid).ToString('B') -eq $row.guid } | Select-Object -First 1
             if (!$adapter) { throw 'Network adapter disappeared during DNS setup' }
             # Mihomo reserves the address AFTER its TUN interface for DNS:
             # listener/sing_tun/server.go uses a.Addr().Next(), not the local IP.
@@ -109,11 +110,14 @@ function Restore-SessionDns([string]$Root, [int]$BudgetMilliseconds=15000) {
     if ($backup.schema -ne 1) { throw 'Invalid DNS backup; recovery was not attempted' }
     $failed=@()
     $clock=[Diagnostics.Stopwatch]::StartNew()
+    $adapters=@(Get-NetAdapter -IncludeHidden)
     foreach ($row in $backup.adapters) {
         try {
             if ($clock.ElapsedMilliseconds -ge $BudgetMilliseconds) { throw 'DNS recovery deadline exceeded; remaining adapters are retained for retry' }
-            $adapter=Get-NetAdapter -IncludeHidden | Where-Object { ([guid]$_.InterfaceGuid).ToString('B') -eq $row.guid } | Select-Object -First 1
+            $adapter=$adapters | Where-Object { ([guid]$_.InterfaceGuid).ToString('B') -eq $row.guid } | Select-Object -First 1
             if (!$adapter) { throw 'Adapter is currently unavailable' }
+            $adapter=Get-NetAdapter -InterfaceIndex $adapter.ifIndex -IncludeHidden -ErrorAction SilentlyContinue | Where-Object { ([guid]$_.InterfaceGuid).ToString('B') -eq $row.guid } | Select-Object -First 1
+            if (!$adapter) { throw 'Adapter identity changed during DNS recovery' }
             $remaining=$BudgetMilliseconds-[int]$clock.ElapsedMilliseconds
             if ($remaining -le 0) { throw 'DNS recovery deadline exceeded; remaining adapters are retained for retry' }
             Invoke-NetshDns $adapter.ifIndex $row.family $row.source @($row.servers) -TimeoutMilliseconds ([Math]::Min(5000,$remaining))
@@ -173,15 +177,39 @@ function Get-SplitTransport([string]$Root, [scriptblock]$Resolver=${function:Res
 }
 
 function Assert-SplitAwgHealth([string]$Root, [string]$Phase) {
-    foreach ($url in @('https://www.gstatic.com/generate_204','https://cp.cloudflare.com/generate_204')) {
-        if (Test-Path -LiteralPath (Join-Path $Root 'runtime\stop.request')) { throw 'Startup cancelled' }
-        try {
-            $result=Invoke-CoreApi $Root ('/proxies/AWG/delay?timeout=7000&url='+[Uri]::EscapeDataString($url))
+    Assert-SplitNotCancelled $Root
+    $context=Get-CoreApiContext $Root
+    $probes=New-Object 'Collections.Generic.List[object]'
+    $clock=[Diagnostics.Stopwatch]::StartNew()
+    try {
+        foreach ($url in @('https://www.gstatic.com/generate_204','https://cp.cloudflare.com/generate_204')) {
+            $request=[Net.HttpWebRequest]::Create($context.url+'/proxies/AWG/delay?timeout=7000&url='+[Uri]::EscapeDataString($url))
+            $request.Proxy=$null;$request.Timeout=8000;$request.ReadWriteTimeout=1000
+            $request.Headers['Authorization']='Bearer '+$context.token
+            $probes.Add(@{request=$request;pending=$request.BeginGetResponse($null,$null);finished=$false})
+        }
+        while($clock.ElapsedMilliseconds -lt 8000) {
             Assert-SplitNotCancelled $Root
-            if ($result.delay -ge 0) { return }
-        } catch {}
-    }
-    throw "VPN connection check failed ($Phase). Startup will be rolled back; see runtime/logs/core.log."
+            $waiting=$false
+            foreach($probe in $probes) {
+                if($probe.finished){continue}
+                $waiting=$true
+                if(!$probe.pending.IsCompleted){continue}
+                $probe.finished=$true;$response=$null;$reader=$null
+                try {
+                    $response=$probe.request.EndGetResponse($probe.pending)
+                    $reader=[IO.StreamReader]::new($response.GetResponseStream())
+                    $result=$reader.ReadToEnd()|ConvertFrom-Json
+                    Assert-SplitNotCancelled $Root
+                    if($result.delay -is [ValueType] -and $result.delay -ge 0){return}
+                } catch {} finally {if($reader){$reader.Dispose()};if($response){$response.Dispose()}}
+            }
+            if(!$waiting){break}
+            Start-Sleep -Milliseconds 25
+        }
+        Assert-SplitNotCancelled $Root
+        throw "VPN connection check failed ($Phase). Startup will be rolled back; see runtime/logs/core.log."
+    } finally {foreach($probe in $probes){$probe.request.Abort();$probe.pending.AsyncWaitHandle.Close()}}
 }
 
 function Assert-SplitNotCancelled([string]$Root) {

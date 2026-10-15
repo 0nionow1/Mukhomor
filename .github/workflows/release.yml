@@ -8,7 +8,108 @@ permissions:
   contents: read
 
 jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      build: ${{ steps.release.outputs.build }}
+    steps:
+      - name: Preserve a complete release already published from verified local packages
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from 'node:fs';
+          const tag=process.env.RELEASE_TAG;
+          if(!/^v\d+\.\d+\.\d+$/.test(tag))throw new Error('Expected vX.Y.Z tag');
+          const response=await fetch(`https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/releases/tags/${tag}`,{headers:{Authorization:`Bearer ${process.env.GH_TOKEN}`,Accept:'application/vnd.github+json'}});
+          if(!response.ok && response.status!==404)throw new Error('Cannot verify existing release: '+response.status);
+          const release=response.ok?await response.json():null,version=tag.slice(1);
+          const expected=['windows-x64.zip','source.zip','linux-x64.tar.gz','android.apk','android-source.zip'].flatMap(suffix=>[`Mukhomor-${version}-${suffix}`,`Mukhomor-${version}-${suffix}.sha256`]);
+          const complete=release && !release.draft && expected.every(name=>release.assets.some(asset=>asset.name===name && asset.size>0 && asset.state==='uploaded'));
+          appendFileSync(process.env.GITHUB_OUTPUT,`build=${!complete}\n`);
+          if(complete)console.log('Complete published release preserved; no signing credentials or replacement build requested.');
+          NODE
+  linux:
+    needs: prepare
+    if: needs.prepare.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+      - name: Install Linux build and test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y build-essential cmake pkg-config libfontconfig1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libssl-dev libxcb-shape0-dev libxcb-xfixes0-dev libcap2-bin zenity xvfb dbus-x11 xauth iproute2
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+      - name: Portable controller and UI tests
+        run: |
+          go test -race -tags=with_gvisor ./core ./cmd/mukhomor-controller
+          cargo test --manifest-path ui/Cargo.toml --locked --lib
+          cargo test --manifest-path native/Cargo.toml --locked --lib -- --test-threads=1
+      - name: Real TUN, TCP, UDP, DNS and route cleanup
+        run: |
+          go build -tags=with_gvisor -o /tmp/mukhomor-controller ./cmd/mukhomor-controller
+          sudo python3 tests/linux-network.py /tmp/mukhomor-controller
+      - name: Linux distribution
+        run: bash Build-Linux.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Mukhomor-platform-linux
+          path: release-staging/
+          if-no-files-found: error
+  android:
+    needs: prepare
+    if: needs.prepare.outputs.build == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+      - name: Android toolchains
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          rustup target add aarch64-linux-android x86_64-linux-android
+          $env:JAVA_HOME=$env:JAVA_HOME_17_X64
+          & "$env:ANDROID_HOME\cmdline-tools\latest\bin\sdkmanager.bat" 'platforms;android-35' 'build-tools;35.0.0' 'ndk;27.2.12479018'
+          if($LASTEXITCODE -ne 0){throw 'Android SDK preparation failed'}
+      - name: Build and verify signed Android APK
+        env:
+          MUKHOMOR_ANDROID_KEYSTORE_BASE64: ${{ secrets.MUKHOMOR_ANDROID_KEYSTORE_BASE64 }}
+          MUKHOMOR_KEYSTORE_PASSWORD: ${{ secrets.MUKHOMOR_KEYSTORE_PASSWORD }}
+          MUKHOMOR_ANDROID_KEY_ALIAS: ${{ secrets.MUKHOMOR_ANDROID_KEY_ALIAS }}
+        run: |
+          $env:JAVA_HOME=$env:JAVA_HOME_17_X64
+          $env:ANDROID_NDK_HOME=Join-Path $env:ANDROID_HOME 'ndk\27.2.12479018'
+          if(!$env:MUKHOMOR_ANDROID_KEYSTORE_BASE64 -or !$env:MUKHOMOR_KEYSTORE_PASSWORD -or !$env:MUKHOMOR_ANDROID_KEY_ALIAS){throw 'Android release signing secrets are required for a complete platform release'}
+          $keystore=Join-Path $env:RUNNER_TEMP 'mukhomor-release.keystore'
+          try {
+            [IO.File]::WriteAllBytes($keystore,[Convert]::FromBase64String($env:MUKHOMOR_ANDROID_KEYSTORE_BASE64))
+            .\Build-Android.ps1 -Keystore $keystore -KeyAlias $env:MUKHOMOR_ANDROID_KEY_ALIAS
+          } finally { if(Test-Path -LiteralPath $keystore){Remove-Item -LiteralPath $keystore -Force} }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Mukhomor-platform-android
+          path: release-staging/
+          if-no-files-found: error
   release:
+    needs: [prepare, linux, android]
+    if: needs.prepare.outputs.build == 'true'
     runs-on: windows-2025
     timeout-minutes: 45
     permissions:
@@ -54,16 +155,20 @@ jobs:
       - name: Verify both archives
         run: |
           foreach($kind in @('windows-x64','source')){
-            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\tests\Test-ReleasePrivacy.ps1 -Archive ('.\dist\Mukhomor-'+$env:RELEASE_VERSION+'-'+$kind+'.zip')
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\tests\Test-ReleasePrivacy.ps1 -Archive ('.\release-staging\'+$env:RELEASE_VERSION+'\windows\x64\Mukhomor-'+$env:RELEASE_VERSION+'-'+$kind+'.zip')
             if($LASTEXITCODE -ne 0){throw 'Package verification failed'}
           }
+      - name: Collect verified Linux and Android packages
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          pattern: Mukhomor-platform-*
+          path: release-staging/
+          merge-multiple: true
       - name: Save build artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Mukhomor-${{ env.RELEASE_VERSION }}
-          path: |
-            dist/*.zip
-            dist/*.sha256
+          path: release-staging/
           if-no-files-found: error
       - name: Create draft release without replacing an existing release
         env:
@@ -76,7 +181,7 @@ jobs:
           try {$existing=Invoke-RestMethod -Uri ('https://api.github.com/repos/'+$env:GH_REPO+'/releases/tags/'+$env:RELEASE_TAG) -Headers $headers}
           catch {if(!$_.Exception.Response -or [int]$_.Exception.Response.StatusCode -ne 404){throw}}
           if($existing){Write-Host 'Release already exists; its reviewed notes and assets are preserved.';exit 0}
-          $files=@(Get-ChildItem -LiteralPath .\dist -File | Where-Object {$_.Name -match ('^Mukhomor-'+[regex]::Escape($env:RELEASE_VERSION)+'-(windows-x64|source)\.zip(\.sha256)?$')} | ForEach-Object {$_.FullName})
-          if($files.Count -ne 4){throw 'Expected exactly two archives and two checksums'}
+          $files=@(Get-ChildItem -LiteralPath (Join-Path .\release-staging $env:RELEASE_VERSION) -Recurse -File | Where-Object {$_.Name -match ('^Mukhomor-'+[regex]::Escape($env:RELEASE_VERSION)+'-(windows-x64\.zip|source\.zip|android-source\.zip|linux-x64\.tar\.gz|android\.apk)(\.sha256)?$')} | ForEach-Object {$_.FullName})
+          if($files.Count -ne 10){throw 'Expected Windows, Linux, Android, source packages and Android corresponding source with their five checksums'}
           & gh release create $env:RELEASE_TAG @files --verify-tag --draft --title ('Mukhomor '+$env:RELEASE_VERSION) --notes-file (Join-Path $env:RUNNER_TEMP 'release-notes.md')
           if($LASTEXITCODE -ne 0){throw 'Draft release creation failed'}

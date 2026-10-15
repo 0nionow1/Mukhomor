@@ -1,0 +1,1941 @@
+[
+  {
+    "key": "home.text001",
+    "page": "home",
+    "label": "К содержимому",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text002",
+    "page": "home",
+    "label": "VPN-КЛИЕНТ · WINDOWS",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text003",
+    "page": "home",
+    "label": "МУХОМОР",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text004",
+    "page": "home",
+    "label": "VPN для игр и работы",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text005",
+    "page": "home",
+    "label": "Читать далее",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text006",
+    "page": "home",
+    "label": "WINDOWS 10 / 11 · x64",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text007",
+    "page": "home",
+    "label": "ДЛЯ ПОДКЛЮЧЕНИЯ НУЖЕН СВОЙ VPS",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text008",
+    "page": "home",
+    "label": "ВОЗМОЖНОСТИ",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text009",
+    "page": "home",
+    "label": "О приложении",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text010",
+    "page": "home",
+    "label": "VPN-клиент с правилами по приложениям,",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text011",
+    "page": "home",
+    "label": "доменам и IP. Подключается к вашему серверу.",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text012",
+    "page": "home",
+    "label": "Скачать",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text013",
+    "page": "home",
+    "label": "Windows 10 / 11 · x64",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text014",
+    "page": "home",
+    "label": "Первое подключение",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text015",
+    "page": "home",
+    "label": "Игры — напрямую",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text016",
+    "page": "home",
+    "label": "Правила для приложений",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text017",
+    "page": "home",
+    "label": "Открытый исходный код",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text018",
+    "page": "home",
+    "label": "01 / МАРШРУТИЗАЦИЯ",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text019",
+    "page": "home",
+    "label": "Выберите",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text020",
+    "page": "home",
+    "label": "маршрут.",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text021",
+    "page": "home",
+    "label": "ПРИМЕР ВАШИХ ПРАВИЛ",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text022",
+    "page": "home",
+    "label": "Мухомор",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text023",
+    "page": "home",
+    "label": "на вашем ПК",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text024",
+    "page": "home",
+    "label": "НАПРЯМУЮ",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text025",
+    "page": "home",
+    "label": "Обычное соединение",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text026",
+    "page": "home",
+    "label": "ЧЕРЕЗ ВАШ VPS",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text027",
+    "page": "home",
+    "label": "Ваш VPN-сервер",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text028",
+    "page": "home",
+    "label": "Вы выбираете маршрут для своих приложений.",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text029",
+    "page": "home",
+    "label": "Работа в трее",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text030",
+    "page": "home",
+    "label": "Автозапуск и автоподключение.",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text031",
+    "page": "home",
+    "label": "Обмен правилами",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text032",
+    "page": "home",
+    "label": "Экспорт наборов без серверных ключей.",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text033",
+    "page": "home",
+    "label": "20 тем",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text034",
+    "page": "home",
+    "label": "Настройка размера и анимации.",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text035",
+    "page": "home",
+    "label": "02 / ПОДКЛЮЧЕНИЕ",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text036",
+    "page": "home",
+    "label": "Нужен свой VPS.",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text037",
+    "page": "home",
+    "label": "Настройте VPN на сервере и добавьте клиентский профиль в Мухо…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text038",
+    "page": "home",
+    "label": "Что нужно для подключения",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text039",
+    "page": "home",
+    "label": "Свой VPS",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text040",
+    "page": "home",
+    "label": "Доступно",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text041",
+    "page": "home",
+    "label": "WireGuard, VLESS, Hysteria 2 и другие протоколы.",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text042",
+    "page": "home",
+    "label": "Mycelia — наш экспериментальный протокол.",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text043",
+    "page": "home",
+    "label": "Нужны совместимые сервер и сборка клиента.",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text044",
+    "page": "home",
+    "label": "P2P",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text045",
+    "page": "home",
+    "label": "В разработке",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text046",
+    "page": "home",
+    "label": "Соединение между участниками сети.",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text047",
+    "page": "home",
+    "label": "Сервис Мухомора",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text048",
+    "page": "home",
+    "label": "В разработке",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text049",
+    "page": "home",
+    "label": "Платное подключение без своего VPS. Сроки и условия пока не о…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text050",
+    "page": "home",
+    "label": "ДОКУМЕНТАЦИЯ",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text051",
+    "page": "home",
+    "label": "Как подключиться",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text052",
+    "page": "home",
+    "label": "Установка, сервер и правила — в одном месте.",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text053",
+    "page": "home",
+    "label": "Открыть руководство",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "home.text054",
+    "page": "home",
+    "label": "Открытый VPN-клиент для Windows. Серверы и ключи не входят в …",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text001",
+    "page": "docs",
+    "label": "К содержимому",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text002",
+    "page": "docs",
+    "label": "СПРАВОЧНИК МУХОМОРА",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text003",
+    "page": "docs",
+    "label": "Документация",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text004",
+    "page": "docs",
+    "label": "Установка, сервер и правила подключения.",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text005",
+    "page": "docs",
+    "label": "История обновлений",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text006",
+    "page": "docs",
+    "label": "01 / БЫСТРЫЙ СТАРТ",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text007",
+    "page": "docs",
+    "label": "Первое подключение",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text008",
+    "page": "docs",
+    "label": "Понадобятся Windows 10 или 11 x64, права администратора для у…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text009",
+    "page": "docs",
+    "label": "Скачайте приложение",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text010",
+    "page": "docs",
+    "label": "Откройте",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text011",
+    "page": "docs",
+    "label": "страницу релизов →",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text012",
+    "page": "docs",
+    "label": "и выберите",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text013",
+    "page": "docs",
+    "label": "Mukhomor-X.Y.Z-windows-x64.zip",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text014",
+    "page": "docs",
+    "label": ". Архивы «Source code» содержат исходники, а не готовое прило…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text015",
+    "page": "docs",
+    "label": "Распакуйте весь архив",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text016",
+    "page": "docs",
+    "label": "Откройте папку",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text017",
+    "page": "docs",
+    "label": "Mukhomor",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text018",
+    "page": "docs",
+    "label": "и запустите",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text019",
+    "page": "docs",
+    "label": "mukhomor.exe",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text020",
+    "page": "docs",
+    "label": ". Подтвердите системный запрос на установку компонентов.",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text021",
+    "page": "docs",
+    "label": "Добавьте свой сервер",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text022",
+    "page": "docs",
+    "label": "Нажмите",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text023",
+    "page": "docs",
+    "label": "«Добавить конфигурацию»",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text024",
+    "page": "docs",
+    "label": ". Выберите клиентский файл или вставьте ссылку либо текст про…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text025",
+    "page": "docs",
+    "label": "Подключитесь",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text026",
+    "page": "docs",
+    "label": "Выберите сервер в списке и нажмите",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text027",
+    "page": "docs",
+    "label": "«Подключиться»",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text028",
+    "page": "docs",
+    "label": ". При необходимости настройте исключения для игр и приложений…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text029",
+    "page": "docs",
+    "label": "Мухомор — клиент. VPS, готовые серверы, ключи и подписки не в…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text030",
+    "page": "docs",
+    "label": "Что подготовить на сервере →",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text031",
+    "page": "docs",
+    "label": "Windows предупреждает при запуске",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text032",
+    "page": "docs",
+    "label": "EXE пока без подписи издателя. Скачивайте архив из официально…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text033",
+    "page": "docs",
+    "label": ".sha256",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text034",
+    "page": "docs",
+    "label": "из того же релиза. Отключать защиту Windows не нужно.",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text035",
+    "page": "docs",
+    "label": "В PowerShell выполните команду, заменив имя файла на имя скач…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text036",
+    "page": "docs",
+    "label": "Get-FileHash -Algorithm SHA256 -LiteralPath '.\\Mukhomor-X.Y.Z…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text037",
+    "page": "docs",
+    "label": "Дальше: сервер и протоколы",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text038",
+    "page": "docs",
+    "label": "02 / СЕРВЕР И ПРОТОКОЛЫ",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text039",
+    "page": "docs",
+    "label": "Свой VPS, свой профиль",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text040",
+    "page": "docs",
+    "label": "VPS — удалённый сервер, который вы арендуете и настраиваете о…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text041",
+    "page": "docs",
+    "label": "Что нужно подготовить",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text042",
+    "page": "docs",
+    "label": "Установите на VPS серверное ПО выбранного протокола.",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text043",
+    "page": "docs",
+    "label": "Создайте отдельный клиентский профиль и убедитесь, что нужный…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text044",
+    "page": "docs",
+    "label": "Перенесите клиентский файл или ссылку в Мухомор. SSH-пароль о…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text045",
+    "page": "docs",
+    "label": "Основные форматы импорта",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text046",
+    "page": "docs",
+    "label": "Протокол",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text047",
+    "page": "docs",
+    "label": "Что добавить",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text048",
+    "page": "docs",
+    "label": "WireGuard / AmneziaWG",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text049",
+    "page": "docs",
+    "label": ".conf",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text050",
+    "page": "docs",
+    "label": "с одним peer",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text051",
+    "page": "docs",
+    "label": "VLESS / VMess",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text052",
+    "page": "docs",
+    "label": "vless://",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text053",
+    "page": "docs",
+    "label": "vmess://",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text054",
+    "page": "docs",
+    "label": "Trojan / Shadowsocks",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text055",
+    "page": "docs",
+    "label": "trojan://",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text056",
+    "page": "docs",
+    "label": "ss://",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text057",
+    "page": "docs",
+    "label": "Hysteria 2 / TUIC",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text058",
+    "page": "docs",
+    "label": "hy2://",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text059",
+    "page": "docs",
+    "label": "tuic://",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text060",
+    "page": "docs",
+    "label": "Другие поддерживаемые типы",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text061",
+    "page": "docs",
+    "label": "Отдельный клиентский узел JSON / YAML",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text062",
+    "page": "docs",
+    "label": "Принимаются клиентские профили, а не произвольные полные конф…",
+    "maxLength": 4000,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text063",
+    "page": "docs",
+    "label": "Другие протоколы и ограничения",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text064",
+    "page": "docs",
+    "label": "Импорт также поддерживает ShadowsocksR, Hysteria 1, Snell, SO…",
+    "maxLength": 4000,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text065",
+    "page": "docs",
+    "label": "Совместимость зависит от параметров профиля, сборки клиента и…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text066",
+    "page": "docs",
+    "label": "Экспериментальный",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text067",
+    "page": "docs",
+    "label": "Mycelia",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text068",
+    "page": "docs",
+    "label": "Наш собственный протокол. Для него нужны совместимые сервер и…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text069",
+    "page": "docs",
+    "label": "Используйте профиль, выданный именно вашей серверной сборкой,…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text070",
+    "page": "docs",
+    "label": "А если нет своего сервера?",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text071",
+    "page": "docs",
+    "label": "Сейчас нужен свой VPS с VPN. P2P и встроенный платный сервис …",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text072",
+    "page": "docs",
+    "label": "Дальше: игры и правила",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text073",
+    "page": "docs",
+    "label": "03 / ИГРЫ И ПРАВИЛА",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text074",
+    "page": "docs",
+    "label": "Каждому — свой маршрут",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text075",
+    "page": "docs",
+    "label": "Игры и выбранные исключения могут идти напрямую, а остальной …",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text076",
+    "page": "docs",
+    "label": "Добавить игру в исключения",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text077",
+    "page": "docs",
+    "label": "Откройте",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text078",
+    "page": "docs",
+    "label": "«Правила»",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text079",
+    "page": "docs",
+    "label": "и выберите нужный набор.",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text080",
+    "page": "docs",
+    "label": "Добавьте имя исполняемого файла игры, например",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text081",
+    "page": "docs",
+    "label": "game.exe",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text082",
+    "page": "docs",
+    "label": ", в список прямых исключений приложений. Учитывайте реальное …",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text083",
+    "page": "docs",
+    "label": "Нажмите",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text084",
+    "page": "docs",
+    "label": "«Сохранить»",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text085",
+    "page": "docs",
+    "label": "и перезапустите игру, чтобы новые соединения использовали пра…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text086",
+    "page": "docs",
+    "label": "Также доступны исключения по доменам, доменным зонам и IP/CID…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text087",
+    "page": "docs",
+    "label": "Прямой маршрут сохраняет обычное соединение с игровым серверо…",
+    "maxLength": 4000,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text088",
+    "page": "docs",
+    "label": "Собрать набор для себя или друга",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text089",
+    "page": "docs",
+    "label": "В разделе",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text090",
+    "page": "docs",
+    "label": "«Наборы»",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text091",
+    "page": "docs",
+    "label": "создавайте наборы и включайте их галочкой. Кнопка",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text092",
+    "page": "docs",
+    "label": "«+ Готовый»",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text093",
+    "page": "docs",
+    "label": "добавляет копию стандартного набора. В разделе",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text094",
+    "page": "docs",
+    "label": "«Правила»",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text095",
+    "page": "docs",
+    "label": "редактируйте его списки и сохраняйте изменения.",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text096",
+    "page": "docs",
+    "label": "Экспорт JSON содержит правила и описание без серверных ключей…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text097",
+    "page": "docs",
+    "label": "Для работы и повседневных задач",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text098",
+    "page": "docs",
+    "label": "Тот же принцип работает для редактора, браузера или рабочего …",
+    "maxLength": 4000,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text099",
+    "page": "docs",
+    "label": "Дальше: каждый день",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text100",
+    "page": "docs",
+    "label": "04 / КАЖДЫЙ ДЕНЬ",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text101",
+    "page": "docs",
+    "label": "Настроить и заниматься своим",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text102",
+    "page": "docs",
+    "label": "Подключение, правила и оформление остаются под рукой — в небо…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text103",
+    "page": "docs",
+    "label": "Окно и трей",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text104",
+    "page": "docs",
+    "label": "Крестик скрывает окно в трей, VPN продолжает работать. Нажмит…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text105",
+    "page": "docs",
+    "label": "«Отключиться»",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text106",
+    "page": "docs",
+    "label": "завершает соединение и восстанавливает DNS.",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text107",
+    "page": "docs",
+    "label": "Чтобы завершить приложение полностью, выберите",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text108",
+    "page": "docs",
+    "label": "«Выход из Mukhomor»",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text109",
+    "page": "docs",
+    "label": "в меню трея.",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text110",
+    "page": "docs",
+    "label": "Автозапуск и автоподключение",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text111",
+    "page": "docs",
+    "label": "Это два отдельных переключателя в настройках.",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text112",
+    "page": "docs",
+    "label": "«Запуск с Windows»",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text113",
+    "page": "docs",
+    "label": "открывает клиент в трее после входа.",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text114",
+    "page": "docs",
+    "label": "«Автоподключение VPN»",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text115",
+    "page": "docs",
+    "label": "подключает последний успешно использованный сервер. Для обоих…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text116",
+    "page": "docs",
+    "label": "Оформление",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text117",
+    "page": "docs",
+    "label": "Откройте",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text118",
+    "page": "docs",
+    "label": "«Настройки → Оформление»",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text119",
+    "page": "docs",
+    "label": ": доступны 20 тем, размеры интерфейса 85%, 100% и 125%, настр…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text120",
+    "page": "docs",
+    "label": "Обновление",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text121",
+    "page": "docs",
+    "label": "Отключитесь и завершите клиент через трей. Скачайте новый рел…",
+    "maxLength": 4000,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text122",
+    "page": "docs",
+    "label": "Удаление",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text123",
+    "page": "docs",
+    "label": "Отключите VPN и откройте",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text124",
+    "page": "docs",
+    "label": "«Параметры Windows → Приложения → Mukhomor → Удалить»",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text125",
+    "page": "docs",
+    "label": ". Профили и настройки сохраняются для повторной установки.",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text126",
+    "page": "docs",
+    "label": "Дальше: решение проблем",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text127",
+    "page": "docs",
+    "label": "05 / ЕСЛИ ЧТО-ТО НЕ ТАК",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text128",
+    "page": "docs",
+    "label": "Проверим по порядку",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text129",
+    "page": "docs",
+    "label": "Несколько коротких ответов на частые вопросы.",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text130",
+    "page": "docs",
+    "label": "Не получается подключиться",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text131",
+    "page": "docs",
+    "label": "Проверьте, что сервер работает, выбран нужный профиль, совпад…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text132",
+    "page": "docs",
+    "label": "Завершите соединение другого VPN-клиента: несколько программ …",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text133",
+    "page": "docs",
+    "label": "Конфигурация не импортируется",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text134",
+    "page": "docs",
+    "label": "Нужен клиентский профиль поддерживаемого формата. Полный серв…",
+    "maxLength": 4000,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text135",
+    "page": "docs",
+    "label": "Посмотреть форматы импорта →",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text136",
+    "page": "docs",
+    "label": "Игра всё ещё использует VPN",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text137",
+    "page": "docs",
+    "label": "Проверьте имя игрового процесса или его полный путь, включите…",
+    "maxLength": 4000,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text138",
+    "page": "docs",
+    "label": "Не работает голосовая связь",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text139",
+    "page": "docs",
+    "label": "Проверьте поддержку UDP протоколом и сервером, а также доступ…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text140",
+    "page": "docs",
+    "label": "Закрыл окно, но VPN остался включён",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text141",
+    "page": "docs",
+    "label": "Это работа в трее. Откройте клиент через значок гриба и нажми…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text142",
+    "page": "docs",
+    "label": "После отключения нужно восстановить DNS",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text143",
+    "page": "docs",
+    "label": "Повторите восстановление в приложении. Если физический сетево…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text144",
+    "page": "docs",
+    "label": "Нужна помощь с ошибкой?",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text145",
+    "page": "docs",
+    "label": "Опишите версию Мухомора и Windows, протокол и шаги, после кот…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text146",
+    "page": "docs",
+    "label": "Сообщить на GitHub",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "docs.text147",
+    "page": "docs",
+    "label": "Открытый VPN-клиент для Windows. Серверы и ключи не входят в …",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "privacy.text001",
+    "page": "privacy",
+    "label": "К содержимому",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "privacy.text002",
+    "page": "privacy",
+    "label": "ПОЛИТИКА COOKIES И ДАННЫХ",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "privacy.text003",
+    "page": "privacy",
+    "label": "Cookies и данные",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "privacy.text004",
+    "page": "privacy",
+    "label": "Редакция 2026-10-15.1. Статистика посещений необязательна и запускается тол",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "privacy.text005",
+    "page": "privacy",
+    "label": "Без аналитики",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "privacy.text006",
+    "page": "privacy",
+    "label": "GitHub Pages выдаёт страницы, а VPS проекта — актуальные тексты и каталог р",
+    "maxLength": 4000,
+    "allowEmpty": false
+  },
+  {
+    "key": "privacy.text007",
+    "page": "privacy",
+    "label": "После вашего согласия",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "privacy.text008",
+    "page": "privacy",
+    "label": "Проект «Мухомор» считает посещения, страну подключения, просмотры страниц и",
+    "maxLength": 4000,
+    "allowEmpty": false
+  },
+  {
+    "key": "privacy.text009",
+    "page": "privacy",
+    "label": "Что и сколько хранится",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "privacy.text010",
+    "page": "privacy",
+    "label": "Вместо собственных аналитических cookies используется localStorage — локаль",
+    "maxLength": 4000,
+    "allowEmpty": false
+  },
+  {
+    "key": "privacy.text011",
+    "page": "privacy",
+    "label": "Cloudflare Turnstile проверяет, что статистику отправляет человек. В нашем ",
+    "maxLength": 4000,
+    "allowEmpty": false
+  },
+  {
+    "key": "privacy.text012",
+    "page": "privacy",
+    "label": "Для определения страны на VPS предусмотрена локальная база",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "privacy.text013",
+    "page": "privacy",
+    "label": "IP Geolocation by DB-IP ↗",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "privacy.text014",
+    "page": "privacy",
+    "label": ", CC BY 4.0. IP посетителей в DB-IP не отправляются. Полный IP не записывае",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "privacy.text015",
+    "page": "privacy",
+    "label": "Выбор можно изменить через «Настройки cookies» внизу любой страницы. «Отклю",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "privacy.text016",
+    "page": "privacy",
+    "label": "Обращения к проекту «Мухомор» (GitHub)",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "privacy.text017",
+    "page": "privacy",
+    "label": "Открытый VPN-клиент для Windows. Серверы и ключи не входят в …",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.text001",
+    "page": "policy",
+    "label": "К содержимому",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.text002",
+    "page": "policy",
+    "label": "ПРОЕКТ МУХОМОР",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.text003",
+    "page": "policy",
+    "label": "Правила использования",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.text004",
+    "page": "policy",
+    "label": "Для работы, учёбы и личных задач.",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.text005",
+    "page": "policy",
+    "label": "Редакция от 15 октября 2026 года",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.text006",
+    "page": "policy",
+    "label": "Назначение проекта",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.text007",
+    "page": "policy",
+    "label": "Мухомор — VPN-клиент для подключения к собственному серверу и…",
+    "maxLength": 4000,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.text008",
+    "page": "policy",
+    "label": "Законное использование",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.text009",
+    "page": "policy",
+    "label": "Проект поддерживает соблюдение применимого законодательства и…",
+    "maxLength": 4000,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.text010",
+    "page": "policy",
+    "label": "Мухомор не предназначен для совершения противоправных действи…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.text011",
+    "page": "policy",
+    "label": "Ответственность пользователя",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.text012",
+    "page": "policy",
+    "label": "Начиная использовать Мухомор, вы принимаете эти правила и обя…",
+    "maxLength": 4000,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.text013",
+    "page": "policy",
+    "label": "Эти правила не изменяют установленную законом ответственность…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.text014",
+    "page": "policy",
+    "label": "Сервер и данные",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.text015",
+    "page": "policy",
+    "label": "Для подключения нужен свой VPS с настроенным VPN и совместимы…",
+    "maxLength": 4000,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.text016",
+    "page": "policy",
+    "label": "Не передавайте посторонним ключи, пароли и рабочие профили. С…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.text017",
+    "page": "policy",
+    "label": "политике данных",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.text018",
+    "page": "policy",
+    "label": "Версии приложения",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.text019",
+    "page": "policy",
+    "label": "Stable — версия, отмеченная владельцем проекта как стабильная…",
+    "maxLength": 4000,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.text020",
+    "page": "policy",
+    "label": "Обращения",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.text021",
+    "page": "policy",
+    "label": "Проект: «Мухомор» (Mukhomor). Вопросы и замечания принимаются…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.text022",
+    "page": "policy",
+    "label": "GitHub Issues ↗",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.text023",
+    "page": "policy",
+    "label": ". Не включайте в публичные обращения персональные данные, сек…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.text024",
+    "page": "policy",
+    "label": "Открытый VPN-клиент для Windows. Серверы и ключи не входят в …",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "faq.what.question",
+    "page": "faq",
+    "label": "Что такое Мухомор?",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "faq.what.answer",
+    "page": "faq",
+    "label": "Ответ: Что такое Мухомор?",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "faq.server.question",
+    "page": "faq",
+    "label": "Что нужно для подключения?",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "faq.server.answer",
+    "page": "faq",
+    "label": "Ответ: Что нужно для подключения?",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "faq.games.question",
+    "page": "faq",
+    "label": "Чем Мухомор удобен для игр?",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "faq.games.answer",
+    "page": "faq",
+    "label": "Ответ: Чем Мухомор удобен для игр?",
+    "maxLength": 4000,
+    "allowEmpty": false
+  },
+  {
+    "key": "faq.work.question",
+    "page": "faq",
+    "label": "Подходит ли приложение для работы?",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "faq.work.answer",
+    "page": "faq",
+    "label": "Ответ: Подходит ли приложение для работы?",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "faq.mycelia.question",
+    "page": "faq",
+    "label": "Что такое Mycelia?",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "faq.mycelia.answer",
+    "page": "faq",
+    "label": "Ответ: Что такое Mycelia?",
+    "maxLength": 4000,
+    "allowEmpty": false
+  },
+  {
+    "key": "faq.service.question",
+    "page": "faq",
+    "label": "Можно подключиться через P2P или встроенный сервис?",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "faq.service.answer",
+    "page": "faq",
+    "label": "Ответ: Можно подключиться через P2P или встроенный сервис?",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "scenario.play.title",
+    "page": "home",
+    "label": "Сценарий play: title",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "scenario.play.description",
+    "page": "home",
+    "label": "Сценарий play: description",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "scenario.play.direct",
+    "page": "home",
+    "label": "Сценарий play: direct",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "scenario.play.vpn",
+    "page": "home",
+    "label": "Сценарий play: vpn",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "scenario.create.title",
+    "page": "home",
+    "label": "Сценарий create: title",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "scenario.create.description",
+    "page": "home",
+    "label": "Сценарий create: description",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "scenario.create.direct",
+    "page": "home",
+    "label": "Сценарий create: direct",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "scenario.create.vpn",
+    "page": "home",
+    "label": "Сценарий create: vpn",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "scenario.daily.title",
+    "page": "home",
+    "label": "Сценарий daily: title",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "scenario.daily.description",
+    "page": "home",
+    "label": "Сценарий daily: description",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "scenario.daily.direct",
+    "page": "home",
+    "label": "Сценарий daily: direct",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "scenario.daily.vpn",
+    "page": "home",
+    "label": "Сценарий daily: vpn",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.roleTitle",
+    "page": "policy",
+    "label": "Роль проекта",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.roleBody",
+    "page": "policy",
+    "label": "Мухомор предоставляет программное обеспечение для настройки подключ…",
+    "maxLength": 4000,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.safetyBody",
+    "page": "policy",
+    "label": "Пользователь обязан защищать ключи и учётные данные, устанавливать …",
+    "maxLength": 4000,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.licenseTitle",
+    "page": "policy",
+    "label": "Лицензия и пределы ответственности",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.licenseBefore",
+    "page": "policy",
+    "label": "Права на исходный код Мухомора определяются",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.licenseLink",
+    "page": "policy",
+    "label": "лицензией MIT",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.licenseAfter",
+    "page": "policy",
+    "label": "; сторонние компоненты распространяются на условиях своих лицензий.…",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.warrantyBody",
+    "page": "policy",
+    "label": "В пределах, допускаемых применимым законом и соответствующей лиценз…",
+    "maxLength": 4000,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.mandatoryBody",
+    "page": "policy",
+    "label": "Ограничения выше не распространяются на ответственность, которую за…",
+    "maxLength": 4000,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.updatesTitle",
+    "page": "policy",
+    "label": "Ознакомление и изменения",
+    "maxLength": 400,
+    "allowEmpty": false
+  },
+  {
+    "key": "policy.updatesBody",
+    "page": "policy",
+    "label": "Ознакомьтесь с этой редакцией до начала использования приложения. И…",
+    "maxLength": 4000,
+    "allowEmpty": false
+  }
+]

@@ -1,4 +1,5 @@
-param([Parameter(Mandatory=$true)][string]$Root)
+param([Parameter(Mandatory=$true)][string]$Root,[switch]$Persistent)
+# MUKHOMOR_BRIDGE_STREAM_V1
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 [Console]::InputEncoding=New-Object Text.UTF8Encoding($false)
@@ -75,12 +76,16 @@ function Write-BridgeReply($Value,[int]$Depth=40) {
     $outputStream.Flush()
 }
 
+$inputReader=[IO.StreamReader]::new([Console]::OpenStandardInput(),(New-Object Text.UTF8Encoding($false,$true)))
+do {
 $request=@{}
+$frameRead=$false
 try {
     # Read the native pipe directly with its declared UTF-8 encoding instead
     # of using the PowerShell host's console text reader.
-    $inputReader=[IO.StreamReader]::new([Console]::OpenStandardInput(),(New-Object Text.UTF8Encoding($false,$true)))
-    try {$raw=$inputReader.ReadToEnd()} finally {$inputReader.Dispose()}
+    $raw=if($Persistent){$inputReader.ReadLine()}else{$inputReader.ReadToEnd()}
+    $frameRead=$true
+    if($null -eq $raw){break}
     if ($raw.Length -gt 4194304) {throw 'Request is too large'}
     $request=Convert-ToMap ($raw | ConvertFrom-Json)
     if (!(Test-Path -LiteralPath (Join-Path $Root 'settings.json'))) {
@@ -195,7 +200,7 @@ try {
             if (!(Get-OwnedCore $Root)) {
                 # The library is authoritative after a forced cancellation may
                 # have interrupted a previous server switch between commits.
-                Import-SplitProfile $Root $profilePath
+                Import-SplitProfile $Root $profilePath -PrepareOnly
                 Start-SplitSession $Root $true
                 if ($target -ne $index.selected) {$index.selected=$target;Save-ProfileIndex $index}
             }
@@ -233,5 +238,9 @@ try {
     $details=Get-FailureDetails $failure $action
     try { Write-AtomicJson (Join-Path $Root 'runtime\last-error.json') $details } catch {}
     Write-BridgeReply @{ok=$false;error=$failure.Exception.Message;error_details=$details} -Depth 8
-    exit 1
+    if(!$Persistent -or !$frameRead){exit 1}
+} finally {
+    Clear-SplitOperationCache
 }
+} while($Persistent)
+$inputReader.Dispose()

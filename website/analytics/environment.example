@@ -1,0 +1,16 @@
+# Private deployment copy: /etc/mukhomor-analytics/environment (root:root, 0600).
+# Generate two DIFFERENT random 32-byte hexadecimal values. Never commit them.
+ANALYTICS_SECRET=REPLACE_WITH_RANDOM_64_HEX
+ANALYTICS_PROXY_KEY=REPLACE_WITH_DIFFERENT_RANDOM_64_HEX
+TURNSTILE_SECRET=REPLACE_WITH_SERVER_SIDE_TURNSTILE_SECRET
+ANALYTICS_DB=/var/lib/mukhomor-analytics/analytics.sqlite
+PORT=8787
+DAILY_SESSIONS=4000
+DAILY_EVENTS=20000
+# Optional private admin. Set ALL five values to enable /admin/ over HTTPS.
+# Generate a scrypt hash with admin-access.mjs password. Never put plaintext here.
+# ADMIN_ORIGIN=https://203.0.113.10
+# ADMIN_USERNAME=owner
+# ADMIN_PASSWORD_HASH=scrypt$32768$8$3$SALT_HEX$HASH_HEX
+# TELEGRAM_BOT_TOKEN=REPLACE_WITH_PRIVATE_BOT_TOKEN
+# TELEGRAM_CHAT_ID=REPLACE_WITH_PAIRED_PRIVATE_CHAT_ID

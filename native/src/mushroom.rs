@@ -202,19 +202,26 @@ const ICON_BOUNDS: (usize, usize, usize, usize) = {
     (left, top, right - left, bottom - top)
 };
 
-// A 32-bit icon resource DIB, including its legacy transparency mask.
+/// Sample the visible mark without the layout padding used inside the window.
+/// Shared by executable resources and the Slint taskbar/tray image.
+pub fn icon_palette_index(x: usize, y: usize, size: usize) -> Option<usize> {
+    assert!((1..=256).contains(&size) && x < size && y < size);
+    let (left, top, width, height) = ICON_BOUNDS;
+    palette_index(
+        MINI[top + (2 * y + 1) * height / (2 * size)][left + (2 * x + 1) * width / (2 * size)],
+    )
+}
+
+// A 32-bit icon resource DIB, including its Windows transparency mask.
 pub fn icon_dib(size: usize, palette_rgb: &[u32; PALETTE_LEN]) -> Vec<u8> {
     assert!((1..=256).contains(&size));
-    let (left, top, width, height) = ICON_BOUNDS;
     let mut pixels = vec![0u8; size * size * 4];
     let mask_row = size.div_ceil(32) * 4;
     let mut mask = vec![0u8; mask_row * size];
     for y in 0..size {
         for x in 0..size {
-            let glyph = MINI[top + (2 * y + 1) * height / (2 * size)]
-                [left + (2 * x + 1) * width / (2 * size)];
             let i = ((size - y - 1) * size + x) * 4;
-            if let Some(index) = palette_index(glyph) {
+            if let Some(index) = icon_palette_index(x, y, size) {
                 let rgb = palette_rgb[index];
                 pixels[i..i + 4].copy_from_slice(&[
                     rgb as u8,
@@ -349,4 +356,151 @@ mod tests {
             }
         }
     }
+}
+
+// Shared by both UI renderers; retain the original 12-pixel icon grids.
+pub fn caption_grid(close: bool) -> &'static [&'static str; 8] {
+    if close {
+        &[
+            "XX....XX", "XXX..XXX", ".XXXXXX.", "..XXXX..", "..XXXX..", ".XXXXXX.", "XXX..XXX",
+            "XX....XX",
+        ]
+    } else {
+        &[
+            "........", "........", "........", "XXXXXXXX", "XXXXXXXX", "........", "........",
+            "........",
+        ]
+    }
+}
+
+pub fn icon_grid(kind: usize) -> &'static [&'static str; 12] {
+    const GRIDS: [[&str; 12]; 9] = [
+        [
+            "............",
+            ".....XX.....",
+            "....XXXX....",
+            "...XX..XX...",
+            "..XX....XX..",
+            ".XX......XX.",
+            "..X......X..",
+            "..X..XX..X..",
+            "..X..XX..X..",
+            "..X..XX..X..",
+            "..XXXXXXXX..",
+            "............",
+        ],
+        [
+            "............",
+            "...XX.......",
+            "XXXXXXXXXXXX",
+            "...XX.......",
+            "............",
+            "........XX..",
+            "XXXXXXXXXXXX",
+            "........XX..",
+            "............",
+            "..XX........",
+            "XXXXXXXXXXXX",
+            "..XX........",
+        ],
+        [
+            "....XXXX....",
+            "....X..X....",
+            "....XXXX....",
+            ".....XX.....",
+            ".....XX.....",
+            "..XXXXXXXX..",
+            "..X......X..",
+            "..X......X..",
+            "XXXX....XXXX",
+            "X..X....X..X",
+            "XXXX....XXXX",
+            "............",
+        ],
+        [
+            ".......XX...",
+            "......XXX...",
+            ".....XXX....",
+            ".....XXX...X",
+            ".....XXX..XX",
+            ".....XXXXXXX",
+            "....XXXXXXX.",
+            "...XXXXX....",
+            "..XXXX......",
+            ".XXXX.......",
+            ".XXX........",
+            "..X.........",
+        ],
+        [
+            "............",
+            "..........XX",
+            ".........XXX",
+            "........XXX.",
+            ".......XXX..",
+            "XX....XXX...",
+            "XXX..XXX....",
+            ".XXXXXX.....",
+            "..XXXX......",
+            "...XX.......",
+            "............",
+            "............",
+        ],
+        [
+            ".....XX.....",
+            ".....XX.....",
+            ".....XX.....",
+            ".XX..XX..XX.",
+            ".XX..XX..XX.",
+            ".XX..XX..XX.",
+            ".XX......XX.",
+            ".XX......XX.",
+            ".XX......XX.",
+            ".XX......XX.",
+            ".XXXXXXXXXX.",
+            ".XXXXXXXXXX.",
+        ],
+        [
+            "............",
+            ".XX......XX.",
+            ".XXX....XXX.",
+            "..XXX..XXX..",
+            "...XXXXXX...",
+            "....XXXX....",
+            "....XXXX....",
+            "...XXXXXX...",
+            "..XXX..XXX..",
+            ".XXX....XXX.",
+            ".XX......XX.",
+            "............",
+        ],
+        [
+            "............",
+            "............",
+            "............",
+            "............",
+            "............",
+            "............",
+            ".XXXXXXXXXX.",
+            ".XXXXXXXXXX.",
+            "............",
+            "............",
+            "............",
+            "............",
+        ],
+        [
+            "............",
+            "......XX....",
+            ".......XX...",
+            "........XX..",
+            ".........XX.",
+            ".XXXXXXXXXXX",
+            ".XXXXXXXXXXX",
+            ".........XX.",
+            "........XX..",
+            ".......XX...",
+            "......XX....",
+            "............",
+        ],
+    ];
+    &GRIDS[kind.min(GRIDS.len() - 1)]
 }

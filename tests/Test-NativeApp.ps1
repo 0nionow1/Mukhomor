@@ -73,8 +73,9 @@ function Save-ProfileIndex($Index) {
     $inputPath=Join-Path $mockRoot 'select-request.json'
     [IO.File]::WriteAllText($inputPath,(@{action='Select';id=$targetId}|ConvertTo-Json -Compress),(New-Object Text.UTF8Encoding($false)))
     $inputExpression="`$raw=[IO.File]::ReadAllText('"+$inputPath.Replace("'","''")+"')"
-    Assert ($source.Contains('$raw=$inputReader.ReadToEnd()')) 'the pure Select fixture locates the request reader'
-    $source=$source.Replace('$raw=$inputReader.ReadToEnd()',$inputExpression)
+    $reader='$raw=if($Persistent){$inputReader.ReadLine()}else{$inputReader.ReadToEnd()}'
+    Assert ($source.Contains($reader)) 'the pure Select fixture locates the request reader'
+    $source=$source.Replace($reader,$inputExpression)
     $scriptPath=Join-Path $mockRoot 'bridge-fixture.ps1'
     [IO.File]::WriteAllText($scriptPath,$source,(New-Object Text.UTF8Encoding($true)))
     $info=New-Object Diagnostics.ProcessStartInfo

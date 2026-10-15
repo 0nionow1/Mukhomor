@@ -8,7 +8,7 @@ foreach ($file in $manifest.files) {
     $path=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot $file.path))
     if (!$path.StartsWith(([IO.Path]::GetFullPath($PSScriptRoot)+'\'),[StringComparison]::OrdinalIgnoreCase) -or !$seen.Add($path) -or $file.sha256 -notmatch '^[a-f0-9]{64}$' -or (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $file.sha256) {throw ('Package verification failed: '+$file.path)}
 }
-foreach($required in @('mukhomor.exe','NativeBridge.ps1','SplitVpn.psm1','RulePresets.ps1','SplitWindows.psm1','TrafficGuard.psm1','ProfileImport.psm1','bin\mihomo-windows-amd64-compatible.exe','bin\wintun.dll','assets\settings.default.json')){if(!$seen.Contains((Join-Path $PSScriptRoot $required))){throw ('Missing application file: '+$required)}}
+foreach($required in @('mukhomor.exe','NativeBridge.ps1','SplitVpn.psm1','RulePresets.ps1','RuleNormalizer.cs','SplitWindows.psm1','TrafficGuard.psm1','ProfileImport.psm1','bin\mihomo-windows-amd64-compatible.exe','bin\wintun.dll','assets\settings.default.json')){if(!$seen.Contains((Join-Path $PSScriptRoot $required))){throw ('Missing application file: '+$required)}}
 if(!$seen.Contains((Join-Path $PSScriptRoot 'AppStartup.ps1'))){throw 'Missing application file: AppStartup.ps1'}
 if($VerifyOnly){Write-Host ('Verified release '+$manifest.version+'; '+$seen.Count+' files');return}
 . (Join-Path $PSScriptRoot 'AppStartup.ps1')

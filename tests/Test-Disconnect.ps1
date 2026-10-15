@@ -450,6 +450,9 @@ try {
     $lostState=Get-Content -LiteralPath (Join-Path $root 'runtime\mock-state.json') -Raw|ConvertFrom-Json
     Assert (!$lostSaved.desired -and !$lostState.running -and !$lostState.recovery -and !(Test-Path -LiteralPath (Join-Path $root 'runtime\dns-backup.json')) -and !(Test-Path -LiteralPath (Join-Path $root 'runtime\session.json'))) 'lost receipt preserves disconnected intent and recovered runtime proof'
     Write-Host ('PASS: '+$passed+' disconnect / cancellation / recovery assertions; no TUN or system DNS touched')
+} catch {
+    Write-Host ('Failure after '+$passed+' assertions: '+$_.Exception.Message)
+    throw
 } finally {
     foreach($client in $clients){if(!$client.process.HasExited){$client.process.Kill();$client.process.WaitForExit()}}
     if($worker -and !$worker.HasExited){$worker.Kill();$worker.WaitForExit()}
@@ -460,5 +463,13 @@ try {
         if($remaining -and $remaining.StartTime.ToUniversalTime().ToString('o') -eq $info.started){$remaining.Kill();$remaining.WaitForExit()}
     }
     $resolved=[IO.Path]::GetFullPath($fixture);$expected=([IO.Path]::GetFullPath($PSScriptRoot)+'\disconnect-')
-    if($resolved.StartsWith($expected,[StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::GetFileName($resolved) -match '^disconnect-[a-f0-9]{32}$'){Remove-Item -LiteralPath $resolved -Recurse -Force}
+    if($resolved.StartsWith($expected,[StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::GetFileName($resolved) -match '^disconnect-[a-f0-9]{32}$'){
+        # Job termination is asynchronous even after the controller has exited.
+        # Give its exact fixture children time to release script handles.
+        $cleanup=[Diagnostics.Stopwatch]::StartNew()
+        while(Test-Path -LiteralPath $resolved){
+            try {Remove-Item -LiteralPath $resolved -Recurse -Force -ErrorAction Stop;break}
+            catch {if($cleanup.ElapsedMilliseconds -ge 3000){throw};Start-Sleep -Milliseconds 100}
+        }
+    }
 }

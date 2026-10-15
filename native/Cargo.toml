@@ -1,18 +1,21 @@
 [package]
 name = "mukhomor"
-version = "0.7.2"
+version = "0.8.1"
 edition = "2024"
 license = "MIT"
-description = "Native Windows client for mihomo with local profile import and gaming split routing"
+description = "Native Slint VPN client for Windows, Linux and Android"
 repository = "https://github.com/0nionow1/Mukhomor"
 homepage = "https://github.com/0nionow1/Mukhomor"
 readme = "../README.md"
 
 [dependencies]
+mukhomor-ui = { path = "../ui", default-features = false }
+raw-window-handle = { version = "=0.6.2" }
 serde = "=1.0.228"
 serde_json = "=1.0.149"
+[target.'cfg(windows)'.dependencies]
 windows-sys = { version = "=0.61.2", features = [
-  "Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_Security",
+  "Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Gdi", "Win32_Security",
   "Win32_Security_Authorization", "Win32_Security_Cryptography", "Win32_System_Threading",
   "Win32_System_Pipes", "Win32_System_IO", "Win32_System_Memory", "Win32_System_JobObjects",
   "Win32_System_Services", "Win32_System_LibraryLoader", "Win32_System_Registry", "Win32_System_Com", "Win32_System_Time",
@@ -20,8 +23,19 @@ windows-sys = { version = "=0.61.2", features = [
   "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock",
   "Win32_Storage_FileSystem", "Win32_UI_WindowsAndMessaging",
   "Win32_UI_Controls", "Win32_UI_Controls_Dialogs", "Win32_UI_Shell",
-  "Win32_UI_HiDpi", "Win32_System_SystemInformation", "Win32_UI_Input_KeyboardAndMouse", "Win32_Storage_Xps"
+  "Win32_System_SystemInformation"
 ] }
+
+[lib]
+name = "mukhomor_app"
+crate-type = ["cdylib", "rlib"]
+
+[target.'cfg(any(windows, target_os = "linux"))'.dependencies]
+mukhomor-ui = { path = "../ui", features = ["desktop"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+mukhomor-ui = { path = "../ui", default-features = false, features = ["android"] }
+jni = "=0.21.1"
 
 [profile.release]
 opt-level = "s"
@@ -29,3 +43,11 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# Optimize the pixel loops and UI state for speed while retaining compact code
+# in the installer and rarely used platform integration.
+[profile.release.package.mukhomor-ui]
+opt-level = 3
+
+[profile.release.package.i-slint-renderer-software]
+opt-level = 3

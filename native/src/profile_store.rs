@@ -10,7 +10,7 @@ fn printable(value: &str, maximum: usize) -> bool {
         && value.encode_utf16().count() <= maximum
         && !value.chars().any(|c| c <= '\u{1f}')
 }
-fn normalize_index(index: &mut Value) -> Result<(), String> {
+pub(super) fn normalize_index(index: &mut Value) -> Result<(), String> {
     let invalid = "Invalid profile library";
     if index["schema"] != 1 {
         return Err(invalid.into());

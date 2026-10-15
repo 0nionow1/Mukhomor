@@ -1,0 +1,13 @@
+{
+  "url": "https://0nionow1.github.io/Mukhomor/",
+  "repository": "https://github.com/0nionow1/Mukhomor",
+  "analytics": {
+    "enabled": false,
+    "endpoint": "https://2.59.162.128:10443",
+    "turnstileSiteKey": "0x4AAAAAAFXur3N_IW-XyJmt"
+  },
+  "content": {
+    "enabled": true,
+    "endpoint": "https://2.59.162.128:10443"
+  }
+}

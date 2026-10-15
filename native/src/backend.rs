@@ -78,7 +78,7 @@ impl Snapshot {
         if request["if_revision"].as_str() == Some(revision.as_str()) {
             json!({"ok":true,"not_modified":true,"revision":revision})
         } else {
-            json!({"ok":true,"revision":revision,"data":self.value})
+            json!({"ok":self.value["initializing"] != true,"revision":revision,"data":self.value})
         }
     }
     fn replace(&mut self, value: Value) {
@@ -359,7 +359,7 @@ pub fn rpc(root: &Path, request: &Value) -> Result<Value, String> {
             null_mut(),
         ));
         if handle.0 == INVALID_HANDLE_VALUE {
-            return Err("Mukhomor ещё запускается. Подожди несколько секунд.".into());
+            return Err("Cannot reach the local Mukhomor service. Retrying…".into());
         }
         let mut pid = 0;
         if GetNamedPipeServerProcessId(handle.0, &mut pid) == 0 {
@@ -876,7 +876,8 @@ fn serve_client(
                         }
                         value["id"] = json!(startup_target(&data));
                     }
-                    if data["shutting_down"] == true
+                    if data["initializing"] == true
+                        || data["shutting_down"] == true
                         || (data["busy"] == true && !["Disconnect", "Exit"].contains(&action))
                         || data["operation"] == "Exit"
                     {
@@ -954,6 +955,30 @@ struct Bridge {
     job: Mutex<OwnedHandle>,
     cancel: OwnedHandle,
     stop: isize,
+    streaming: bool,
+    worker: Mutex<Option<StreamWorker>>,
+}
+
+// One supervised interpreter per bridge. Only one request is in flight; each
+// response is bounded and framed, independent of the lifetime of core children.
+struct StreamWorker {
+    child: std::process::Child,
+    input: Option<mpsc::Sender<Vec<u8>>>,
+    output: mpsc::Receiver<Result<Vec<u8>, String>>,
+    ready: Arc<Mutex<OwnedHandle>>,
+    reader: thread::JoinHandle<()>,
+    writer: thread::JoinHandle<()>,
+}
+impl Drop for StreamWorker {
+    fn drop(&mut self) {
+        self.input.take();
+        let _ = self.child.kill();
+        unsafe {
+            CancelSynchronousIo(self.reader.as_raw_handle() as HANDLE);
+            CancelSynchronousIo(self.writer.as_raw_handle() as HANDLE);
+        }
+        let _ = self.child.wait();
+    }
 }
 impl Bridge {
     fn new_job() -> Result<OwnedHandle, String> {
@@ -982,6 +1007,9 @@ impl Bridge {
                 return Err("Cannot create the cancellation event".into());
             }
             Ok(Self {
+                streaming: std::fs::read_to_string(base.join("NativeBridge.ps1"))
+                    .is_ok_and(|text| text.contains("# MUKHOMOR_BRIDGE_STREAM_V1")),
+                worker: Mutex::new(None),
                 base,
                 root,
                 job: Mutex::new(job),
@@ -1022,6 +1050,158 @@ impl Bridge {
         Ok(())
     }
     fn call(&self, value: &Value) -> Result<Value, String> {
+        if self.streaming {
+            self.call_stream(value)
+        } else {
+            self.call_once(value)
+        }
+    }
+    fn start_stream(&self) -> Result<StreamWorker, String> {
+        let system = std::env::var_os("SystemRoot").unwrap_or("C:\\Windows".into());
+        let mut child = Command::new(
+            PathBuf::from(system).join("System32/WindowsPowerShell/v1.0/powershell.exe"),
+        )
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+        ])
+        .arg(self.base.join("NativeBridge.ps1"))
+        .arg("-Root")
+        .arg(&self.root)
+        .arg("-Persistent")
+        .env("MUKHOMOR_ASSETS", &self.base)
+        .env("MUKHOMOR_CORE_PATH", bundled_core_path(&self.base))
+        .env("MUKHOMOR_STATE_ROOT", &self.root)
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+        if unsafe {
+            AssignProcessToJobObject(self.job.lock().unwrap().0, child.as_raw_handle() as HANDLE)
+        } == 0
+        {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("Cannot supervise the background process safely".into());
+        }
+        let ready = Arc::new(Mutex::new(OwnedHandle(unsafe {
+            CreateEventW(null(), 1, 0, null())
+        })));
+        if ready.lock().unwrap().0.is_null() {
+            let _ = child.kill();
+            return Err("Cannot create bridge reply event".into());
+        }
+        let (input, requests) = mpsc::channel::<Vec<u8>>();
+        let (replies, output) = mpsc::channel();
+        let mut stdout = BufReader::new(child.stdout.take().unwrap());
+        let mut stdin = child.stdin.take().unwrap();
+        let read_ready = ready.clone();
+        let read_replies = replies.clone();
+        let reader = thread::spawn(move || {
+            loop {
+                let reply = read_bridge_frame(&mut stdout);
+                let failed = reply.is_err();
+                if read_replies.send(reply).is_err() {
+                    break;
+                }
+                platform::signal(read_ready.lock().unwrap().0 as isize);
+                if failed {
+                    break;
+                }
+            }
+        });
+        let write_ready = ready.clone();
+        let writer = thread::spawn(move || {
+            while let Ok(payload) = requests.recv() {
+                if let Err(error) = stdin
+                    .write_all(&payload)
+                    .and_then(|_| stdin.write_all(b"\n"))
+                    .and_then(|_| stdin.flush())
+                {
+                    let _ = replies.send(Err(error.to_string()));
+                    platform::signal(write_ready.lock().unwrap().0 as isize);
+                    break;
+                }
+            }
+        });
+        Ok(StreamWorker {
+            child,
+            input: Some(input),
+            output,
+            ready,
+            reader,
+            writer,
+        })
+    }
+    fn call_stream(&self, value: &Value) -> Result<Value, String> {
+        let action = value["action"].as_str().unwrap_or("");
+        let mut slot = self.worker.lock().unwrap();
+        if slot
+            .as_mut()
+            .is_some_and(|w| !matches!(w.child.try_wait(), Ok(None)))
+        {
+            *slot = None;
+        }
+        if slot.is_none() {
+            *slot = Some(self.start_stream()?);
+        }
+        let worker = slot.as_mut().unwrap();
+        let ready = worker.ready.lock().unwrap().0;
+        unsafe {
+            ResetEvent(ready);
+        }
+        let payload = serde_json::to_vec(value).map_err(|e| e.to_string())?;
+        if worker.input.as_ref().unwrap().send(payload).is_err() {
+            *slot = None;
+            return Err("Фоновый обработчик остановлен".into());
+        }
+        let cancellable = CANCELLABLE_ACTIONS.contains(&action);
+        let mut handles = vec![ready, worker.child.as_raw_handle() as HANDLE];
+        if cancellable {
+            handles.extend([self.cancel.0, self.stop as HANDLE]);
+        }
+        let wait = unsafe {
+            WaitForMultipleObjects(
+                handles.len() as u32,
+                handles.as_ptr(),
+                0,
+                self.limit(action).as_millis() as u32,
+            )
+        };
+        if wait == WAIT_OBJECT_0 {
+            match worker.output.try_recv() {
+                Ok(Ok(bytes)) => return decode_bridge_reply(&bytes, true),
+                Ok(Err(error)) => {
+                    *slot = None;
+                    return Err(error);
+                }
+                Err(_) => {}
+            }
+        }
+        if cancellable && (wait == WAIT_OBJECT_0 + 2 || wait == WAIT_OBJECT_0 + 3) {
+            let _ = self.terminate();
+            *slot = None;
+            return Err("Подключение отменено".into());
+        }
+        if ["Connect", "Select", "Disconnect", "Exit", "Init"].contains(&action) {
+            let _ = self.terminate();
+        }
+        *slot = None;
+        Err(if wait == WAIT_TIMEOUT {
+            format!(
+                "Операция {action} превысила {} секунд",
+                self.limit(action).as_secs()
+            )
+        } else {
+            "Фоновый обработчик остановлен; повтори операцию".into()
+        })
+    }
+    fn call_once(&self, value: &Value) -> Result<Value, String> {
         let action = value["action"].as_str().unwrap_or("");
         let limit = self.limit(action);
         let script = self.base.join("NativeBridge.ps1");
@@ -1301,18 +1481,124 @@ fn background_snapshot(
     }
     data.replace(snapshot);
 }
+// DNS has its own process group. Foreground commands cancel and join this
+// worker before touching shared files; cancellation cannot kill the VPN core.
+struct BackgroundDns {
+    bridge: Option<Bridge>,
+    task: Option<thread::JoinHandle<(Bridge, Result<Value, String>)>>,
+    cancel: isize,
+    wake: isize,
+}
+impl BackgroundDns {
+    fn new(main: &Bridge, wake: isize) -> Result<Self, String> {
+        let bridge = Bridge::new(main.base.clone(), main.root.clone(), main.stop)?;
+        Ok(Self {
+            cancel: bridge.cancel.0 as isize,
+            bridge: Some(bridge),
+            task: None,
+            wake,
+        })
+    }
+    fn start(&mut self) {
+        if self.task.is_some() {
+            return;
+        }
+        unsafe {
+            ResetEvent(self.cancel as HANDLE);
+        }
+        let bridge = self.bridge.take().unwrap();
+        let wake = self.wake;
+        self.task = Some(thread::spawn(move || {
+            let result = bridge.call(&json!({"action":"UpdateDns"}));
+            platform::signal(wake);
+            (bridge, result)
+        }));
+    }
+    fn finish(&mut self) -> Option<Result<Value, String>> {
+        if !self.task.as_ref().is_some_and(|task| task.is_finished()) {
+            return None;
+        }
+        let (bridge, result) = self
+            .task
+            .take()
+            .unwrap()
+            .join()
+            .expect("DNS worker panicked");
+        self.bridge = Some(bridge);
+        Some(result)
+    }
+    fn cancel(&mut self) {
+        if let Some(task) = self.task.take() {
+            platform::signal(self.cancel);
+            let (bridge, _) = task.join().expect("DNS worker panicked");
+            self.bridge = Some(bridge);
+        }
+    }
+}
+impl Drop for BackgroundDns {
+    fn drop(&mut self) {
+        self.cancel();
+    }
+}
+
 fn startup_snapshot(bridge: &Bridge) -> Value {
-    let index = std::fs::read(bridge.root.join("private/profiles.json"))
-        .ok()
-        .and_then(|x| serde_json::from_slice::<Value>(&x).ok())
+    fn read_bounded(path: &Path, maximum: u64, private: bool) -> Option<Value> {
+        let file = crate::setup::pin_control_path(path, false, private).ok()?;
+        let mut bytes = Vec::new();
+        file.take(maximum + 1).read_to_end(&mut bytes).ok()?;
+        if bytes.len() as u64 > maximum {
+            return None;
+        }
+        serde_json::from_slice(bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(&bytes)).ok()
+    }
+    let index = read_bounded(&bridge.root.join("private/profiles.json"), 524288, true)
+        .and_then(|mut index| {
+            profile_store::normalize_index(&mut index)
+                .ok()
+                .map(|_| index)
+        })
         .unwrap_or(json!({"profiles":[],"selected":"","autoconnect":false}));
-    let mut settings = std::fs::read(bridge.root.join("settings.json"))
-        .or_else(|_| std::fs::read(bridge.base.join("assets/settings.default.json")))
-        .ok()
-        .and_then(|x| serde_json::from_slice::<Value>(&x).ok())
+    let profiles: Vec<_> = index["profiles"].as_array().unwrap().iter().map(|p|
+        json!({"id":p["id"],"name":p["name"],"protocol":p.get("protocol").cloned().unwrap_or(json!("WireGuard / AmneziaWG"))})
+    ).collect();
+    let mut settings = read_bounded(&bridge.root.join("settings.json"), 2097152, false)
+        .or_else(|| {
+            std::fs::read(bridge.base.join("assets/settings.default.json"))
+                .ok()
+                .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        })
         .unwrap_or(json!({"dns_update":{"enabled":false}}));
     crate::presets::normalize(&mut settings);
-    json!({"profiles":index["profiles"],"selected":index["selected"],"autoconnect":index["autoconnect"],"settings":settings,"running":false,"starting":false,"dns_recovery_pending":bridge.root.join("runtime/dns-backup.json").exists(),"traffic_guard":{"configured":bridge.root.join("private/traffic-guard-plan.json").exists(),"verified":false,"protected":false},"status_uncertain":true})
+    json!({"profiles":profiles,"selected":index["selected"],"last_connected":index["last_connected"],"autoconnect":index["autoconnect"],"settings":settings,"running":false,"starting":false,"dns_recovery_pending":bridge.root.join("runtime/dns-backup.json").exists(),"traffic_guard":{"configured":bridge.root.join("private/traffic-guard-plan.json").exists(),"verified":false,"protected":false},"status_uncertain":true})
+}
+fn start_listener(
+    root: PathBuf,
+    cache: SharedSnapshot,
+    intent: Arc<Mutex<ConnectionIntent>>,
+    tx: mpsc::Sender<Request>,
+    signals: (isize, isize, isize),
+    login: Arc<AtomicBool>,
+) -> Result<mpsc::Receiver<Result<(), String>>, String> {
+    let (ready_tx, ready_rx) = mpsc::channel();
+    thread::spawn(move || {
+        let result = listener(
+            root,
+            cache,
+            intent,
+            tx,
+            signals,
+            Arc::new(AtomicU64::new(0)),
+            login,
+        );
+        if result.is_err() {
+            platform::signal(signals.1);
+        }
+        let _ = ready_tx.send(result);
+    });
+    if let Ok(result) = ready_rx.recv_timeout(Duration::from_millis(10)) {
+        result?;
+    }
+    Ok(ready_rx)
 }
 pub fn run(base: PathBuf, root: PathBuf, stop: isize) -> Result<(), String> {
     // Only an isolated test worker can model SCM's actual boot-start reason.
@@ -1365,6 +1651,43 @@ fn run_with_startup_mode(
         std::fs::read(root.join("runtime/stop.request")).is_ok_and(|bytes| bytes == b"disconnect");
     // A shutdown marker belongs to the preceding service lifetime.
     let _ = std::fs::remove_file(root.join("runtime/stop.request"));
+    let cancellation = crate::setup::cleanup_request::pending(&root)?;
+    let durable_cancel = cancellation.is_some();
+    if cleanup_only && cancellation.is_none() {
+        return Err("CLEANUP_REQUEST_MISSING".into());
+    }
+    let intent = Arc::new(Mutex::new(ConnectionIntent {
+        generation: 0,
+        desired: false,
+    }));
+    let mut preview = startup_snapshot(&bridge);
+    preview["initializing"] = json!(true);
+    preview["service_ready"] = json!(false);
+    preview["busy"] = json!(true);
+    preview["phase"] = json!("loading");
+    let cache = Arc::new(Mutex::new(Snapshot::new(preview)));
+    let login_available = Arc::new(AtomicBool::new(false));
+    let wake_handle = OwnedHandle(unsafe { CreateEventW(null(), 0, 0, null()) });
+    if wake_handle.0.is_null() {
+        return Err("Cannot create the request event".into());
+    }
+    let wake = wake_handle.0 as isize;
+    let (tx, rx) = mpsc::channel();
+    // Cleanup-only service starts remain unavailable until their durable intent
+    // is committed. Normal starts expose read-only metadata immediately.
+    let early = !cleanup_only && !durable_cancel;
+    let early_listener = if early {
+        Some(start_listener(
+            root.clone(),
+            cache.clone(),
+            intent.clone(),
+            tx.clone(),
+            (wake, stop, bridge.cancel.0 as isize),
+            login_available.clone(),
+        )?)
+    } else {
+        None
+    };
     let mut initial = match bridge.call(&json!({"action":"Init"})) {
         Ok(data) => data,
         Err(error) => {
@@ -1373,11 +1696,6 @@ fn run_with_startup_mode(
             data
         }
     };
-    let cancellation = crate::setup::cleanup_request::pending(&root)?;
-    let durable_cancel = cancellation.is_some();
-    if cleanup_only && cancellation.is_none() {
-        return Err("CLEANUP_REQUEST_MISSING".into());
-    }
     let (saved, persistence_error) = match read_intent(&root) {
         Ok(saved) => (saved, None),
         Err(error) if cancellation.is_some() => return Err(error),
@@ -1391,10 +1709,10 @@ fn run_with_startup_mode(
         cleanup_only,
         durable_cancel,
     );
-    let intent = Arc::new(Mutex::new(ConnectionIntent {
+    *intent.lock().unwrap() = ConnectionIntent {
         generation: saved.as_ref().map_or(0, |saved| saved.generation),
         desired: initial_desired,
-    }));
+    };
     if let Some(error) = persistence_error {
         initial["last_error"] = json!(error);
         intent.lock().unwrap().desired = false;
@@ -1438,50 +1756,34 @@ fn run_with_startup_mode(
     initial["operation_id"] = json!(0);
     initial["completed_operation_id"] = json!(0);
     initial["last_operation"] = Value::Null;
-    let cache = Arc::new(Mutex::new(Snapshot::new(initial)));
-    let login_available = Arc::new(AtomicBool::new({
-        let data = cache.lock().unwrap();
-        !cleanup_only
-            && !durable_cancel
-            && !interrupted_disconnect
-            && (data["last_error"].is_null() || data["last_error"].as_str() == Some(""))
-    }));
+    cache.lock().unwrap().replace(initial);
+    login_available.store(
+        {
+            let data = cache.lock().unwrap();
+            !cleanup_only
+                && !durable_cancel
+                && !interrupted_disconnect
+                && (data["last_error"].is_null() || data["last_error"].as_str() == Some(""))
+        },
+        Ordering::Relaxed,
+    );
     let mut boot_target = if system_boot {
         startup_target(&cache.lock().unwrap()).map(str::to_owned)
     } else {
         None
     };
-    let wake_handle = OwnedHandle(unsafe { CreateEventW(null(), 0, 0, null()) });
-    if wake_handle.0.is_null() {
-        return Err("Cannot create the request event".into());
-    }
-    let wake = wake_handle.0 as isize;
-    let (tx, rx) = mpsc::channel();
-    let (ready_tx, ready_rx) = mpsc::channel();
-    let listener_root = root.clone();
-    let listener_cache = cache.clone();
-    let listener_intent = intent.clone();
-    let cancel = bridge.cancel.0 as isize;
-    let counter = Arc::new(AtomicU64::new(0));
-    thread::spawn(move || {
-        let result = listener(
-            listener_root,
-            listener_cache,
-            listener_intent,
+    let ready_rx = if let Some(receiver) = early_listener {
+        receiver
+    } else {
+        start_listener(
+            root.clone(),
+            cache.clone(),
+            intent.clone(),
             tx,
-            (wake, stop, cancel),
-            counter,
+            (wake, stop, bridge.cancel.0 as isize),
             login_available,
-        );
-        if result.is_err() {
-            platform::signal(stop);
-        }
-        let _ = ready_tx.send(result);
-    });
-    // Listener errors surface immediately; healthy listener blocks on events.
-    if let Ok(result) = ready_rx.recv_timeout(Duration::from_millis(100)) {
-        result?;
-    }
+        )?
+    };
     let mut retry = if intent.lock().unwrap().desired {
         Some(Instant::now())
     } else {
@@ -1491,11 +1793,23 @@ fn run_with_startup_mode(
     let mut core = bridge.core();
     let mut stable_since = core.as_ref().map(|_| Instant::now());
     let mut next_dns = Instant::now();
+    let mut dns_worker = BackgroundDns::new(&bridge, wake)?;
     let mut clean_exit = false;
     while !platform::signaled(stop) {
+        if let Some(Ok(data)) = dns_worker.finish() {
+            let mut current = cache.lock().unwrap();
+            if current["running"] == true {
+                for key in ["dns_hosts", "dns_pending", "dns_failed"] {
+                    if current[key] != data[key] {
+                        current[key] = data[key].clone();
+                    }
+                }
+            }
+        }
         if let Some(at) = retry
             && at <= Instant::now()
         {
+            dns_worker.cancel();
             if let Err(error) = permit_connect(&root) {
                 let mut current = intent.lock().unwrap();
                 current.desired = false;
@@ -1571,6 +1885,8 @@ fn run_with_startup_mode(
             }
         }
         while let Ok(request) = rx.try_recv() {
+            dns_worker.cancel();
+            next_dns = Instant::now() + Duration::from_secs(20);
             if platform::signaled(stop) {
                 let _ = request
                     .reply
@@ -1725,6 +2041,7 @@ fn run_with_startup_mode(
             .as_ref()
             .is_some_and(|h| unsafe { WaitForSingleObject(h.0, 0) == WAIT_OBJECT_0 })
         {
+            dns_worker.cancel();
             core = None;
             stable_since = None;
             cache.lock().unwrap()["running"] = json!(false);
@@ -1736,12 +2053,14 @@ fn run_with_startup_mode(
                 retry = Some(Instant::now() + Duration::from_secs(5));
             }
         }
-        let dns =
-            cache.lock().unwrap()["settings"]["dns_update"]["enabled"] == true && core.is_some();
-        if dns && next_dns <= Instant::now() {
-            if let Ok(data) = bridge.call(&json!({"action":"UpdateDns"})) {
-                background_snapshot(&cache, &intent, data);
-            }
+        let dns = {
+            let current = cache.lock().unwrap();
+            current["settings"]["dns_update"]["enabled"] == true
+                && current["settings"]["routing"]["mode"] != "full"
+                && core.is_some()
+        };
+        if dns && dns_worker.task.is_none() && next_dns <= Instant::now() {
+            dns_worker.start();
             next_dns = Instant::now() + Duration::from_secs(20);
         }
         let mut timeout = u32::MAX;
@@ -1751,7 +2070,7 @@ fn run_with_startup_mode(
                 .as_millis()
                 .min(u32::MAX as u128) as u32;
         }
-        if dns {
+        if dns && dns_worker.task.is_none() {
             timeout = timeout.min(
                 next_dns
                     .saturating_duration_since(Instant::now())
@@ -1760,6 +2079,9 @@ fn run_with_startup_mode(
             );
         }
         let mut handles = vec![stop as HANDLE, wake as HANDLE];
+        if let Some(task) = &dns_worker.task {
+            handles.push(task.as_raw_handle() as HANDLE);
+        }
         if let Some(ref handle) = core {
             handles.push(handle.0);
         }
@@ -1767,6 +2089,7 @@ fn run_with_startup_mode(
             WaitForMultipleObjects(handles.len() as u32, handles.as_ptr(), 0, timeout);
         }
     }
+    dns_worker.cancel();
     if !clean_exit {
         let _ = bridge.call(&json!({"action":"Recover"}));
     }
@@ -1779,6 +2102,76 @@ fn run_with_startup_mode(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn background_dns_cancellation_is_prompt_and_cannot_kill_foreground_children() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join(format!("dns-worker-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("runtime")).unwrap();
+        std::fs::write(root.join("qa.marker"), b"isolated DNS cancellation fixture").unwrap();
+        std::fs::write(
+            root.join("NativeBridge.ps1"),
+            r#"param([string]$Root)
+$null=[Console]::In.ReadToEnd()
+[IO.File]::WriteAllText((Join-Path $Root 'runtime/entered'),[string]$PID)
+Start-Sleep -Seconds 30
+[Console]::WriteLine('{"ok":true,"data":{"dns_hosts":1}}')
+"#,
+        )
+        .unwrap();
+        let stop = OwnedHandle(unsafe { CreateEventW(null(), 1, 0, null()) });
+        let wake = OwnedHandle(unsafe { CreateEventW(null(), 0, 0, null()) });
+        let main = Bridge::new(root.clone(), root.clone(), stop.0 as isize).unwrap();
+        let shell = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+            .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+        let mut foreground = Command::new(shell)
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Start-Sleep -Seconds 60",
+            ])
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        if unsafe {
+            AssignProcessToJobObject(
+                main.job.lock().unwrap().0,
+                foreground.as_raw_handle() as HANDLE,
+            )
+        } == 0
+        {
+            let _ = foreground.kill();
+            panic!("Cannot supervise fixture child");
+        }
+        let mut dns = BackgroundDns::new(&main, wake.0 as isize).unwrap();
+        dns.start();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !root.join("runtime/entered").exists() {
+            assert!(Instant::now() < deadline, "DNS fixture did not start");
+            thread::sleep(Duration::from_millis(10));
+        }
+        let pid = std::fs::read_to_string(root.join("runtime/entered"))
+            .unwrap()
+            .parse::<u32>()
+            .unwrap();
+        let helper = OwnedHandle(unsafe { OpenProcess(SYNCHRONIZE, 0, pid) });
+        let start = Instant::now();
+        dns.cancel();
+        assert!(start.elapsed() < Duration::from_secs(2));
+        assert_eq!(
+            unsafe { WaitForSingleObject(helper.0, 1000) },
+            WAIT_OBJECT_0
+        );
+        assert!(foreground.try_wait().unwrap().is_none());
+        foreground.kill().unwrap();
+        foreground.wait().unwrap();
+        drop(dns);
+        drop(main);
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     #[test]
     fn conditional_status_invalidates_on_all_mutations_and_new_instances() {

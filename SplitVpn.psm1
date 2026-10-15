@@ -5,6 +5,12 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'ProfileImport.psm1') -Force -DisableNameChecking
 $script:DomainIdnMapping=New-Object Globalization.IdnMapping
 . (Join-Path $PSScriptRoot 'RulePresets.ps1')
+$script:OperationCorePins=@{}
+$script:ValidatedSettingsCache=$null
+function Clear-SplitOperationCache {
+    foreach($entry in $script:OperationCorePins.Values){$entry.exe.Dispose();if($entry.manifest){$entry.manifest.Dispose()}}
+    $script:OperationCorePins.Clear()
+}
 
 function Read-JsonFile([string]$Path) {
     if (!(Test-Path -LiteralPath $Path)) { throw "File not found: $Path" }
@@ -357,10 +363,17 @@ function Test-PublicIp([string]$Value) {
 }
 
 function Get-SplitSettings([string]$Root, $InputSettings = $null) {
-    $s = if ($null -eq $InputSettings) { Read-JsonFile (Join-Path $Root 'settings.json') } else { Convert-ToMap $InputSettings }
+    $raw=$null
+    if($null -eq $InputSettings) {
+        $raw=[IO.File]::ReadAllText((Join-Path $Root 'settings.json'),[Text.Encoding]::UTF8)
+        if($null -ne $script:ValidatedSettingsCache -and $script:ValidatedSettingsCache.root -ceq $Root -and [string]::Equals($script:ValidatedSettingsCache.raw,$raw,[StringComparison]::Ordinal)) {
+            return Convert-ToMap $script:ValidatedSettingsCache.settings
+        }
+        $s=Convert-ToMap ($raw|ConvertFrom-Json)
+    } else {$s=Convert-ToMap $InputSettings}
     if ($s.direct -isnot [hashtable]) {throw 'Invalid direct rules'}
     foreach ($key in @('domain_rule_sets','rule_set_exclusions')) {if (!$s.direct.ContainsKey($key)) {$s.direct[$key]=@()}}
-    $s=Convert-RuleSettings $s
+    $s=Convert-RuleSettings $s -Owned
     # Existing installs retain their chosen split policy. Full routing is an
     # explicit independent mode; exception lists remain saved for switching back.
     if (!$s.ContainsKey('routing')) { $s.routing=@{mode='split';allow_lan=$true} }
@@ -380,6 +393,9 @@ function Get-SplitSettings([string]$Root, $InputSettings = $null) {
     # Reserve half of the 4 MiB IPC frame for diagnostics and the server library.
     # Measure serialized UTF-8 bytes, including JSON escaping, rather than characters.
     if ([Text.Encoding]::UTF8.GetByteCount(($s | ConvertTo-Json -Depth 40 -Compress)) -gt 2097152) {throw 'Settings exceed 2 MiB; reduce rule list size. Your draft has been kept.'}
+    if($null -eq $InputSettings) {
+        $script:ValidatedSettingsCache=if([Text.Encoding]::UTF8.GetByteCount($raw) -le 4194304){@{root=$Root;raw=$raw;settings=(Convert-ToMap $s)}}else{$null}
+    }
     return $s
 }
 
@@ -446,13 +462,31 @@ function Get-CorePath([string]$Root) {
     $manifestPath=Join-Path $Root 'bin\mycelium-build.json'
     $exe=if ($env:MUKHOMOR_CORE_PATH) { $env:MUKHOMOR_CORE_PATH } elseif(Test-Path -LiteralPath $manifestPath) { Join-Path $Root 'bin\mihomo-mycelium.exe' } else { Join-Path $Root 'bin\mihomo-windows-amd64-compatible.exe' }
     $exe=Convert-SplitProgramPath $exe
+    if($env:MUKHOMOR_STATE_ROOT -and $script:OperationCorePins.ContainsKey($exe)){return $exe}
     if (!(Test-Path -LiteralPath $exe)) { throw 'Mihomo executable is missing' }
     if([IO.Path]::GetFileName($exe) -eq 'mihomo-mycelium.exe'){
         $manifestPath=Join-Path ([IO.Path]::GetDirectoryName($exe)) 'mycelium-build.json'
         if(!(Test-Path -LiteralPath $manifestPath -PathType Leaf)){throw 'Mycelium build manifest is missing'}
         if((Get-Item -LiteralPath $manifestPath).Length -gt 16384){throw 'Invalid Mycelium build manifest'}
         $build=Read-JsonFile $manifestPath
-        if(!$build.ContainsKey('schema') -or $build.schema -ne 1 -or !$build.ContainsKey('protocol_version') -or $build.protocol_version -ne 1 -or !$build.ContainsKey('core_sha256') -or $build.core_sha256 -cnotmatch '^[a-f0-9]{64}$' -or (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant() -cne $build.core_sha256){throw 'Mycelium core integrity verification failed'}
+        if(!$build.ContainsKey('schema') -or $build.schema -ne 1 -or !$build.ContainsKey('protocol_version') -or $build.protocol_version -ne 1 -or !$build.ContainsKey('core_sha256') -or $build.core_sha256 -cnotmatch '^[a-f0-9]{64}$'){throw 'Mycelium core integrity verification failed'}
+        if(!$env:MUKHOMOR_STATE_ROOT -and (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant() -cne $build.core_sha256){throw 'Mycelium core integrity verification failed'}
+    }
+    if($env:MUKHOMOR_STATE_ROOT) {
+        $exePin=$null;$manifestPin=$null
+        try {
+            $exePin=[IO.File]::Open($exe,'Open','Read','Read')
+            if([IO.Path]::GetFileName($exe) -eq 'mihomo-mycelium.exe') {$manifestPin=[IO.File]::Open($manifestPath,'Open','Read','Read')}
+            $hasher=[Security.Cryptography.SHA256]::Create()
+            try {$fingerprint=([BitConverter]::ToString($hasher.ComputeHash($exePin))).Replace('-','').ToLowerInvariant()}finally{$hasher.Dispose()}
+            if($manifestPin) {
+                if($manifestPin.Length -gt 16384){throw 'Invalid Mycelium build manifest'}
+                $reader=[IO.StreamReader]::new($manifestPin,[Text.Encoding]::UTF8,$true,1024,$true)
+                try {$pinnedBuild=$reader.ReadToEnd()|ConvertFrom-Json}finally{$reader.Dispose()}
+                if($pinnedBuild.schema -ne 1 -or $pinnedBuild.protocol_version -ne 1 -or $pinnedBuild.core_sha256 -cnotmatch '^[a-f0-9]{64}$' -or $pinnedBuild.core_sha256 -cne $fingerprint){throw 'Mycelium core integrity verification failed'}
+            }
+            $script:OperationCorePins[$exe]=@{exe=$exePin;manifest=$manifestPin;hash=$fingerprint}
+        } catch {if($exePin){$exePin.Dispose()};if($manifestPin){$manifestPin.Dispose()};throw}
     }
     return $exe
 }
@@ -607,19 +641,26 @@ function Invoke-SplitBoundedProcess([string]$FilePath, [string[]]$Arguments, [in
 }
 
 function Test-CoreConfig([string]$Root, [string]$Path) {
-    $result=Invoke-SplitBoundedProcess (Get-CorePath $Root) @('-t','-d',$Root,'-f',$Path) 5000 'Mihomo configuration validation'
+    $core=Get-CorePath $Root
+    # Core validation also reads provider files. Always validate those fresh;
+    # only the immutable, pinned executable is reused within an operation.
+    $result=Invoke-SplitBoundedProcess $core @('-t','-d',$Root,'-f',$Path) 5000 'Mihomo configuration validation'
     if ($result.exit_code -ne 0) { throw ('Mihomo rejected the configuration: ' + $result.stdout + ' ' + $result.stderr) }
 }
 
-function Invoke-CoreApi([string]$Root, [string]$Route, [string]$Method='GET', $Body=$null, [int]$TimeoutSeconds=10) {
-    if ($TimeoutSeconds -lt 1 -or $TimeoutSeconds -gt 10) { throw 'Invalid controller request timeout' }
+function Get-CoreApiContext([string]$Root) {
     # Settings are validated on import/apply. API probes only need the controller
     # port; normalizing thousands of exception entries for every probe, provider
     # update and DNS observation needlessly competes with the VPN for CPU.
     $s=[IO.File]::ReadAllText((Join-Path $Root 'settings.json'),[Text.Encoding]::UTF8) | ConvertFrom-Json
     if ($s.schema -notin @(1,2) -or $s.ports.controller -isnot [int] -or $s.ports.controller -lt 1024 -or $s.ports.controller -gt 65535) { throw 'Invalid controller settings' }
     $token=(Get-Content -LiteralPath (Join-Path $Root 'private\api-token.txt') -Raw).Trim()
-    $params=@{Uri="http://127.0.0.1:$($s.ports.controller)$Route";Method=$Method;Headers=@{Authorization="Bearer $token"};TimeoutSec=$TimeoutSeconds;UseBasicParsing=$true}
+    return @{url="http://127.0.0.1:$($s.ports.controller)";token=$token}
+}
+function Invoke-CoreApi([string]$Root, [string]$Route, [string]$Method='GET', $Body=$null, [int]$TimeoutSeconds=10) {
+    if ($TimeoutSeconds -lt 1 -or $TimeoutSeconds -gt 10) { throw 'Invalid controller request timeout' }
+    $context=Get-CoreApiContext $Root
+    $params=@{Uri=($context.url+$Route);Method=$Method;Headers=@{Authorization="Bearer $($context.token)"};TimeoutSec=$TimeoutSeconds;UseBasicParsing=$true}
     if ($null -ne $Body) { $params.Body=($Body | ConvertTo-Json -Depth 40); $params.ContentType='application/json' }
     return Invoke-RestMethod @params
 }
@@ -673,7 +714,7 @@ function Update-SplitRuleSets([string]$Root) {
     return @{updated=$updated;api_errors=$errors}
 }
 
-function Import-SplitProfile([string]$Root, [string]$Source) {
+function Import-SplitProfile([string]$Root, [string]$Source, [switch]$PrepareOnly) {
     if((Get-Item -LiteralPath $Source).Length -gt 524288){throw 'Profile import: size limit exceeded.'}
     $text=[IO.File]::ReadAllText($Source);$nodes=@(Convert-SplitProfileText $text)
     if($nodes.Count -ne 1){throw 'Profile import: activation requires exactly one outgoing node.'}
@@ -683,7 +724,7 @@ function Import-SplitProfile([string]$Root, [string]$Source) {
     try{
         Write-AtomicJson (Join-Path $Root 'private\selected-profile.json') @{schema=1;proxy=$nodes[0].proxy}
         if($text.Trim().StartsWith('[Interface]',[StringComparison]::Ordinal)){Write-AtomicText (Join-Path $Root 'private\awg.conf') $text}else{[IO.File]::Delete((Join-Path $Root 'private\awg.conf'))}
-        Set-SplitConfig $Root (Get-SplitSettings $Root)
+        if(!$PrepareOnly){Set-SplitConfig $Root (Get-SplitSettings $Root)}
         Write-AtomicJson (Join-Path $Root 'private\profile-info.json') @{source_name=[IO.Path]::GetFileName($Source);protocol=$nodes[0].protocol;imported=[datetime]::UtcNow.ToString('o')}
     }catch{
         $failure=$_

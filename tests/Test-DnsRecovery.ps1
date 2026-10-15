@@ -13,8 +13,8 @@ $fixture=Join-Path $PSScriptRoot ('dns-'+[guid]::NewGuid().ToString('N'))
     $script:FailIpv6=$false
     $script:FailRestore=$false
     $script:SetupError=$null
-    function script:Get-NetAdapter { param([switch]$IncludeHidden) return $script:Adapter }
-    function script:Get-NetRoute { param($InterfaceIndex,$ErrorAction) return [pscustomobject]@{DestinationPrefix='0.0.0.0/0'} }
+    function script:Get-NetAdapter { param([switch]$IncludeHidden,$InterfaceIndex,$ErrorAction) return $script:Adapter }
+    function script:Get-NetRoute { param($InterfaceIndex,$ErrorAction) return [pscustomobject]@{DestinationPrefix='0.0.0.0/0';InterfaceIndex=$script:Adapter.ifIndex} }
     function script:Get-ItemProperty { param($LiteralPath,$ErrorAction) return [pscustomobject]@{NameServer=$(if ($LiteralPath -match 'Tcpip6') {''} else {'8.8.8.8,8.8.4.4'})} }
     function script:Invoke-NetshDns {
         param($Index,$Family,$Source,$Servers,$TimeoutMilliseconds)

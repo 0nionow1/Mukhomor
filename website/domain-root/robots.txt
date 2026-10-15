@@ -1,0 +1,5 @@
+# Must be served at the host root: https://0nionow1.github.io/robots.txt
+User-agent: *
+Allow: /
+
+Sitemap: https://0nionow1.github.io/Mukhomor/sitemap.xml

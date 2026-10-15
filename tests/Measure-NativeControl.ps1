@@ -1,8 +1,7 @@
-param([Parameter(Mandatory=$true)][string]$Executable,[string]$Output,[int]$Repeats=5,[switch]$VerifyNative,[switch]$MeasureStartup)
+﻿param([Parameter(Mandatory=$true)][string]$Executable,[string]$Output,[int]$Repeats=5,[switch]$VerifyNative)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 if($Repeats -lt 1 -or $Repeats -gt 100){throw 'Repeats must be between 1 and 100'}
-if($MeasureStartup -and !$VerifyNative){throw 'Startup probe requires the current native version'}
 . (Join-Path $PSScriptRoot 'Set-OwnedTestRoot.ps1')
 $package=Split-Path -Parent $PSScriptRoot
 $Executable=[IO.Path]::GetFullPath($Executable)
@@ -62,27 +61,17 @@ try {
     $watch=[Diagnostics.Stopwatch]::StartNew()
     $worker=Start-Process -FilePath $Executable -ArgumentList ('--worker --base "'+$package+'" --root "'+$fixture+'"') -WindowStyle Hidden -PassThru
     $ready=$false
+    $profilesMs=$null
     while($watch.Elapsed.TotalSeconds -lt 60){
-        try {$initial=Request @{action='Status'};if($initial.ok){$ready=$true;break}}catch{if($worker.HasExited){throw 'Worker exited before readiness'}}
+        try {
+            $initial=Request @{action='Status'}
+            if($null -eq $profilesMs -and $initial.PSObject.Properties.Name -contains 'data' -and @($initial.data.profiles).Count -gt 0){$profilesMs=$watch.Elapsed.TotalMilliseconds}
+            if($initial.ok){$ready=$true;break}
+        }catch{if($worker.HasExited){throw 'Worker exited before readiness'}}
         Start-Sleep -Milliseconds 50
     }
     Assert $ready 'Controller did not become ready'
     $readyMs=$watch.Elapsed.TotalMilliseconds
-    $uiSamples=@()
-    if($MeasureStartup){
-        for($i=0;$i -lt $Repeats;$i++){
-            $metricsPath=Join-Path $fixture 'native-startup-performance.json'
-            if(Test-Path -LiteralPath $metricsPath){[IO.File]::Delete($metricsPath)}
-            $ui=Start-Process -FilePath $Executable -ArgumentList ('--qa-startup --base "'+$package+'" --root "'+$fixture+'"') -WindowStyle Hidden -PassThru
-            try {
-                if(!$ui.WaitForExit(30000)){$ui.Kill();$ui.WaitForExit();throw 'UI startup probe timed out'}
-                Assert ($ui.ExitCode -eq 0 -and (Test-Path -LiteralPath $metricsPath)) 'UI startup probe failed'
-                $metrics=Get-Content -LiteralPath $metricsPath -Raw|ConvertFrom-Json
-                Assert (!$metrics.status_uncertain) 'UI startup did not receive confirmed controller state'
-                $uiSamples+=@($metrics)
-            }finally{$ui.Dispose()}
-        }
-    }
     for($i=0;$i -lt $Repeats;$i++) {
         $full=Request @{action='Status'} 'status_full'
         $revision=if($full.PSObject.Properties.Name -contains 'revision'){$full.revision}else{'unsupported'}
@@ -103,7 +92,7 @@ try {
     Assert (!$invalid.ok -and [IO.File]::ReadAllText((Join-Path $fixture 'private\profiles.json')) -ceq $before) 'Invalid rename must preserve disk state'
     $saved=$before|ConvertFrom-Json
     Assert ($saved.profiles[0].name -eq "Fixture $($Repeats-1)" -and !$saved.selected -and !$saved.last_connected) 'Profile metadata and connection history must remain separate'
-    $report=[ordered]@{schema=1;executable_sha256=(Get-FileHash -LiteralPath $Executable).Hash;controller_ready_ms=$readyMs;ui_startup=$uiSamples;scope='Isolated real controller; no TUN, DNS changes or VPN connection. RPC timings exclude JSON parsing in this probe.';samples=@($samples.ToArray())}
+    $report=[ordered]@{schema=1;executable_sha256=(Get-FileHash -LiteralPath $Executable).Hash;first_profiles_ms=$profilesMs;controller_ready_ms=$readyMs;scope='Isolated real controller; no TUN, DNS changes or VPN connection. RPC timings exclude JSON parsing in this probe.';samples=@($samples.ToArray())}
     if(!$Output){$Output=Join-Path $fixture 'performance.json'}
     $report|ConvertTo-Json -Depth 8|Set-Content -LiteralPath $Output -Encoding UTF8
     Write-Host ('PASS: control operations and status; measurements '+$Output)

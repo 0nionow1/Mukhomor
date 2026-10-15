@@ -1,0 +1,7 @@
+# Future domain-based setup, not active. A stable Tunnel requires an owned domain.
+tunnel: REPLACE_WITH_TUNNEL_UUID
+credentials-file: /etc/cloudflared/REPLACE_WITH_TUNNEL_UUID.json
+ingress:
+  - hostname: stats.example.com
+    service: http://127.0.0.1:8090
+  - service: http_status:404

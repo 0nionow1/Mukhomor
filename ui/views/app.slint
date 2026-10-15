@@ -1,0 +1,983 @@
+import { ListView, LineEdit, TextEdit, ScrollView, CheckBox, ComboBox, AboutSlint, Palette as WidgetPalette } from "std-widgets.slint";
+import "../../assets/fonts/Tiny5-Regular.ttf";
+
+export struct Profile { id: string, name: string, protocol: string, selected: bool }
+export struct Preset { id: string, name: string, description: string, enabled: bool, builtin: bool }
+export global Palette {
+    in property <color> background: #160d1b;
+    in property <color> panel: #251329;
+    in property <color> raised: #351d3b;
+    in property <color> ink: #fff0fa;
+    in property <color> muted: #c8adc9;
+    in property <color> accent: #ff52b9;
+    in property <color> teal: #16f5d1;
+    in property <color> line: #6c3c71;
+    in property <color> danger: #ff98aa;
+    in property <color> button-ink: #160d1b;
+    in property <float> scale: 1;
+    in property <bool> rounded: true;
+    public pure function corner-step(w: length, h: length) -> length {
+        return self.rounded ? floor(min(4 * self.scale, min(w,h) / 12px)) * 1px : 0px;
+    }
+}
+export global I18n {
+    in property <int> revision;
+    pure callback translate(string, int) -> string;
+    public pure function tr(source: string) -> string { return self.translate(source, self.revision); }
+}
+global Interaction { in-out property <bool> blocked; }
+
+global Art {
+    in-out property <image> background;
+    in-out property <image> panel;
+    in-out property <image> raised;
+    in-out property <image> accent;
+    in-out property <image> check;
+    in-out property <float> width;
+    in-out property <float> height;
+    in-out property <bool> effects: true;
+    in-out property <Point> origin;
+}
+component Label inherits Text {
+    color: Palette.ink;
+    font-size: 24px * Palette.scale;
+    vertical-alignment: center;
+    overflow: elide;
+}
+component Hint inherits Label { font-size: 16px * Palette.scale; color: Palette.muted; }
+// Each surface samples the same field in window coordinates, including cutouts.
+component TextureBand inherits Rectangle {
+    in property <int> texture: -1;
+    in property <color> fill: transparent;
+    background: fill;
+    clip: true;
+    if Art.effects && root.texture >= 0: Image {
+        source: root.texture == 0 ? Art.background : root.texture == 1 ? Art.panel : root.texture == 2 ? Art.raised : Art.accent;
+        x: Art.origin.x - root.absolute-position.x;
+        y: Art.origin.y - root.absolute-position.y;
+        width: Art.width * 1px * Palette.scale;
+        height: Art.height * 1px * Palette.scale;
+        image-rendering: pixelated;
+    }
+}
+// The original has three integer stair steps, never smooth rounded cards.
+component PixelShape inherits Rectangle {
+    in property <color> fill;
+    in property <int> texture: -1;
+    private property <length> minimum: min(root.width, root.height);
+    private property <length> step: Palette.corner-step(root.width,root.height);
+    // Narrow shapes (notably scrollbar thumbs) have one step, as in Win32.
+    // Forcing three steps into a 5–6 px bar would create negative-width bands.
+    private property <length> small-corner: Palette.rounded && root.step == 0px && root.minimum >= 3px
+        ? floor(min(max(1,4 * Palette.scale),root.minimum / 3px)) * 1px : 0px;
+    if root.step == 0px && root.small-corner == 0px: TextureBand { fill: root.fill; texture: root.texture; }
+    if root.small-corner > 0px: Rectangle {
+        TextureBand { x: root.small-corner; width: parent.width - 2 * self.x; height: root.small-corner; fill: root.fill; texture: root.texture; }
+        TextureBand { y: root.small-corner; width: parent.width; height: parent.height - 2 * self.y; fill: root.fill; texture: root.texture; }
+        TextureBand { x: root.small-corner; y: parent.height - root.small-corner; width: parent.width - 2 * self.x; height: root.small-corner; fill: root.fill; texture: root.texture; }
+    }
+    if root.step > 0px: Rectangle {
+        for i in 7: TextureBand {
+            x: (i < 3 ? 3-i : i > 3 ? i - 3 : 0) * root.step;
+            y: i <= 3 ? i * root.step : root.height - (7-i) * root.step;
+            width: root.width - 2 * self.x;
+            height: i == 3 ? max(0px,root.height - 6 * root.step) : root.step;
+            fill: root.fill; texture: root.texture;
+        }
+    }
+}
+component Surface inherits Rectangle {
+    in property <color> fill: Palette.panel;
+    in property <int> texture: 1;
+    in property <color> stroke: Palette.line;
+    in property <length> outline: 0px;
+    PixelShape { fill: root.stroke; visible: root.outline > 0px; }
+    PixelShape {
+        x: root.outline; y: root.outline;
+        width: parent.width - 2 * root.outline; height: parent.height - 2 * root.outline;
+        fill: root.fill; texture: root.texture;
+    }
+    @children
+}
+// Lists sit directly on the window field. Cover only the pixels outside their
+// stepped silhouette, sampling that same animated field in window coordinates.
+// This keeps a full-height viewport: no row padding or reduced visible capacity.
+// This backdrop-specific cutout is deliberately not used on overlay popups.
+component ListCornerCutouts inherits Rectangle {
+    private property <length> step: Palette.corner-step(root.width,root.height);
+    if root.step > 0px: Rectangle {
+        for i in 3: Rectangle {
+            TextureBand { x: 0px; y: i * root.step; width: (3-i) * root.step; height: root.step; texture: 0; fill: Palette.background; }
+            TextureBand { x: root.width - self.width; y: i * root.step; width: (3-i) * root.step; height: root.step; texture: 0; fill: Palette.background; }
+            TextureBand { x: 0px; y: root.height - (i+1) * root.step; width: (3-i) * root.step; height: root.step; texture: 0; fill: Palette.background; }
+            TextureBand { x: root.width - self.width; y: root.height - (i+1) * root.step; width: (3-i) * root.step; height: root.step; texture: 0; fill: Palette.background; }
+        }
+    }
+}
+// A checkbox keeps a square silhouette with two short pixel steps. Its border
+// and check are drawn on one integer grid instead of resampling a small icon.
+component CheckIndicator inherits Rectangle {
+    in property <bool> checked;
+    in property <bool> enabled: true;
+    in property <bool> hovered;
+    in property <bool> focused;
+    in property <bool> pressed;
+    private property <length> unit: max(1,round(2 * Palette.scale)) * 1px;
+    private property <length> corner: Palette.rounded ? root.unit : 0px;
+    private property <color> rim: !root.enabled ? Palette.line : root.focused || root.pressed || (root.hovered && root.checked) ? Palette.ink : root.checked || root.hovered ? Palette.teal : Palette.muted;
+    private property <color> fill: root.checked ? (root.enabled ? Palette.teal : Palette.line) : root.hovered && root.enabled ? Palette.raised : Palette.panel;
+    width: max(24,round(14 * Palette.scale) * 2) * 1px; height: self.width;
+    for i in 5: Rectangle {
+        x: (i < 2 ? 2-i : i > 2 ? i - 2 : 0) * root.corner;
+        y: i <= 2 ? i * root.corner : root.height - (5-i) * root.corner;
+        width: root.width - 2 * self.x;
+        height: i == 2 ? root.height - 4 * root.corner : root.corner;
+        background: root.rim;
+    }
+    Rectangle {
+        x: root.unit; y: root.unit; width: parent.width - 2 * self.x; height: parent.height - 2 * self.y;
+        for i in 3: Rectangle {
+            x: i == 1 ? 0px : root.corner;
+            y: i == 0 ? 0px : i == 1 ? root.corner : parent.height - root.corner;
+            width: parent.width - 2 * self.x;
+            height: i == 1 ? parent.height - 2 * root.corner : root.corner;
+            background: root.fill;
+        }
+    }
+    if root.checked: Rectangle {
+        width: 8 * root.unit; height: self.width;
+        x: floor((parent.width - self.width)/2px) * 1px;
+        y: floor((parent.height - self.height)/2px) * 1px;
+        for dot in [{col:0,row:3},{col:1,row:4},{col:2,row:5},{col:3,row:4},{col:4,row:3},{col:5,row:2},{col:6,row:1}]: Rectangle {
+            x: dot.col * root.unit; y: dot.row * root.unit; width: 2 * root.unit; height: self.width;
+            background: root.enabled ? Palette.background : Palette.muted;
+        }
+    }
+}
+component PixelCheckBox inherits Rectangle {
+    in property <bool> checked;
+    in property <bool> enabled: true;
+    in property <string> text;
+    callback toggled;
+    width: 44px * Palette.scale; height: self.width;
+    CheckIndicator {
+        x: floor((parent.width - self.width)/2px) * 1px;
+        y: floor((parent.height - self.height)/2px) * 1px;
+        checked: root.checked; enabled: root.enabled;
+        hovered: touch.has-hover; pressed: touch.pressed; focused: focus.has-focus;
+    }
+    focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => { if root.enabled && event.text == " " { root.toggled(); return accept; } return reject; }
+    }
+    forward-focus: focus;
+    touch := TouchArea { enabled: root.enabled; clicked => { focus.focus(); root.toggled(); } }
+    accessible-role: checkbox; accessible-label: text; accessible-checked: checked; accessible-enabled: enabled;
+    accessible-action-default => { if root.enabled { root.toggled(); } }
+}
+component Action inherits Rectangle {
+    in property <string> text;
+    in property <image> glyph;
+    in property <length> glyph-size: 24px * Palette.scale;
+    in property <color> glyph-color: root.selected ? Palette.teal : Palette.muted;
+    in property <bool> enabled: true;
+    in property <bool> primary: false;
+    in property <bool> modal: false;
+    in property <bool> flat: false;
+    in property <bool> selected: false;
+    in property <bool> compact: false;
+    in property <length> text-size: 24px * Palette.scale;
+    private property <bool> active: enabled && (!Interaction.blocked || modal);
+    callback clicked;
+    height: (compact ? 34px : 42px) * Palette.scale;
+    vertical-stretch: 0;
+    min-width: 0px;
+    Surface {
+        visible: !root.flat || focus.has-focus || touch.has-hover;
+        fill: !root.enabled ? Palette.panel : root.primary ? Palette.accent : Palette.raised;
+        texture: !root.enabled ? 1 : root.primary ? 3 : 2;
+        outline: focus.has-focus || root.selected ? 1px : 0px;
+        stroke: Palette.teal;
+    }
+    Label {
+        x: root.compact ? 4px : 10px; width: parent.width - 2 * self.x; height: parent.height;
+        text: root.text; horizontal-alignment: center;
+        font-size: root.text-size;
+        color: !root.enabled ? Palette.muted : root.primary ? Palette.button-ink : root.selected ? Palette.teal : Palette.ink;
+    }
+    Image {
+        source: root.glyph; width: root.glyph-size; height: self.width;
+        x: (parent.width - self.width)/2; y: (parent.height - self.height)/2;
+        colorize: root.enabled ? root.glyph-color : Palette.muted;
+        image-rendering: pixelated;
+    }
+    focus := FocusScope {
+        enabled: root.active;
+        key-pressed(event) => {
+            if event.text == " " || event.text == "\n" { root.clicked(); return accept; }
+            return reject;
+        }
+    }
+    forward-focus: focus;
+    touch := TouchArea { enabled: root.active; clicked => { focus.focus(); root.clicked(); } }
+    accessible-role: button; accessible-label: text; accessible-enabled: active;
+    accessible-action-default => { if active { root.clicked(); } }
+}
+component ModalAction inherits Action { modal: true; }
+// The hit lane stays reserved even without overflow. Both ends of the rail
+// clear the surface's three corner steps; drag keeps its original grab point.
+component PixelScrollBar inherits Rectangle {
+    in property <bool> enabled: true;
+    in property <length> viewport-height;
+    in property <length> content-height;
+    in-out property <length> content-y;
+    in property <length> inset: round(16 * Palette.scale) * 1px;
+    out property <length> track-y: rail.y;
+    out property <length> track-height: rail.height;
+    private property <length> maximum: max(0px,root.content-height - root.viewport-height);
+    private property <length> pressed-y;
+    private property <length> pressed-offset;
+    width: round(16 * Palette.scale) * 1px;
+    visible: root.maximum > 0px;
+    rail := Rectangle {
+        y: min(root.inset,parent.height/2); height: max(0px,floor((parent.height - 2 * self.y)/1px) * 1px);
+        PixelShape {
+            x: floor((parent.width - self.width)/2px) * 1px;
+            width: max(3,round(6 * Palette.scale)) * 1px; height: parent.height;
+            fill: Palette.line.with-alpha(0.25);
+        }
+        thumb := PixelShape {
+            x: floor((parent.width - self.width)/2px) * 1px;
+            width: max(3,round(6 * Palette.scale)) * 1px;
+            height: min(parent.height,max(round(28 * Palette.scale) * 1px,
+                floor(parent.height * root.viewport-height / max(1px,root.content-height) / 1px) * 1px));
+            y: round(clamp(-root.content-y / max(1px,root.maximum),0,1) * (parent.height - self.height) / 1px) * 1px;
+            fill: Palette.accent;
+        }
+        TouchArea {
+            enabled: root.enabled;
+            pointer-event(event) => {
+                if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                    if self.mouse-y < thumb.y || self.mouse-y > thumb.y + thumb.height {
+                        root.content-y = -root.maximum * clamp((self.mouse-y - thumb.height/2)/max(1px,rail.height - thumb.height),0,1);
+                    }
+                    root.pressed-y = self.mouse-y;
+                    root.pressed-offset = root.content-y;
+                }
+            }
+            moved => {
+                if self.pressed {
+                    root.content-y = clamp(root.pressed-offset - (self.mouse-y - root.pressed-y)
+                        * root.maximum/max(1px,rail.height - thumb.height),-root.maximum,0px);
+                }
+            }
+            scroll-event(event) => {
+                root.content-y = clamp(root.content-y + event.delta-y,-root.maximum,0px);
+                return accept;
+            }
+        }
+    }
+}
+component PageScroll inherits Rectangle {
+    in property <bool> enabled: true;
+    in property <length> gutter: 24px;
+    view := ScrollView {
+        x: 0px; y: 0px; width: parent.width - root.gutter; height: parent.height;
+        enabled: root.enabled;
+        vertical-scrollbar-policy: always-off; horizontal-scrollbar-policy: always-off;
+        @children
+    }
+    PixelScrollBar {
+        x: parent.width - self.width; height: parent.height;
+        viewport-height: view.height; content-height: view.content-height; content-y <=> view.content-y;
+        enabled: root.enabled;
+    }
+}
+component Toggle inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <bool> modal: false;
+    in-out property <bool> checked;
+    private property <bool> active: root.enabled && (!Interaction.blocked || root.modal);
+    callback toggled;
+    min-height: 42px * Palette.scale;
+    max-height: 42px * Palette.scale;
+    Surface { fill: Palette.raised; texture: 2; outline: focus.has-focus ? 1px : 0px; stroke: Palette.teal; }
+    Label { x: 10px; width: indicator.x - self.x - 12px * Palette.scale; height: parent.height; text: root.text; font-size: (root.width < 400px ? 20px : 24px) * Palette.scale; color: root.enabled ? Palette.ink : Palette.muted; }
+    indicator := CheckIndicator {
+        x: floor((parent.width - self.width - 10px * Palette.scale)/1px) * 1px;
+        y: floor((parent.height - self.height)/2px) * 1px;
+        checked: root.checked; enabled: root.enabled;
+        hovered: touch.has-hover && root.active; pressed: touch.pressed && root.active; focused: focus.has-focus && root.active;
+    }
+    focus := FocusScope {
+        enabled: root.active;
+        key-pressed(event) => { if root.active && event.text == " " { root.checked = !root.checked; root.toggled(); return accept; } return reject; }
+    }
+    forward-focus: focus;
+    touch := TouchArea { enabled: root.active; clicked => { focus.focus(); root.checked = !root.checked; root.toggled(); } }
+    accessible-role: checkbox; accessible-label: text; accessible-checked: checked; accessible-enabled: active;
+    accessible-action-default => { if root.enabled && (!Interaction.blocked || root.modal) { root.checked = !root.checked; root.toggled(); } }
+}
+
+
+component Field inherits Rectangle {
+    in-out property <string> text <=> input.text;
+    in property <bool> enabled: true;
+    callback edited(string);
+    min-height: 38px * Palette.scale; max-height: 38px * Palette.scale;
+    Surface { fill: Palette.raised; texture: 2; outline: 1px; stroke: input.has-focus ? Palette.teal : Palette.line; }
+    input := TextInput {
+        x: 12px; y: 5px; width: parent.width - 24px; height: parent.height - 10px;
+        single-line: true; color: Palette.ink; font-size: 24px * Palette.scale;
+        vertical-alignment: center; enabled: root.enabled;
+        selection-background-color: Palette.teal; selection-foreground-color: Palette.background;
+        edited => { root.edited(self.text); }
+    }
+    forward-focus: input;
+}
+component Editor inherits Rectangle {
+    in-out property <string> text <=> input.text;
+    in property <bool> enabled: true;
+    in property <bool> read-only: false;
+    in property <TextWrap> wrap: word-wrap;
+    callback edited;
+    Surface { fill: Palette.raised; texture: 2; outline: 1px; stroke: input.has-focus ? Palette.teal : Palette.line; }
+    view := Flickable {
+        x: 12px; y: 10px; width: parent.width - 32px; height: parent.height - 20px;
+        content-width: self.width; content-height: max(self.height,input.preferred-height);
+        mouse-drag-pan-enabled: false;
+        input := TextInput {
+            width: view.width; height: max(view.height,self.preferred-height);
+            enabled: root.enabled; read-only: root.read-only;
+            single-line: false; wrap: root.wrap; color: Palette.ink;
+            font-size: 24px * Palette.scale; page-height: view.height;
+            selection-background-color: Palette.teal; selection-foreground-color: Palette.background;
+            edited => { root.edited(); }
+            cursor-position-changed(position) => {
+                if position.y + view.content-y < 0px { view.content-y = -position.y; }
+                if position.y + view.content-y > view.height - 28px * Palette.scale { view.content-y = min(0px, view.height - position.y - 28px * Palette.scale); }
+            }
+        }
+    }
+    PixelScrollBar {
+        x: parent.width - self.width; height: parent.height;
+        viewport-height: view.height; content-height: view.content-height; content-y <=> view.content-y;
+        enabled: root.enabled;
+    }
+    forward-focus: input;
+}
+component Choice inherits Rectangle {
+    in property <[string]> model;
+    in property <bool> enabled: true;
+    in-out property <int> current-index;
+    callback selected;
+    min-height: 38px * Palette.scale; max-height: 38px * Palette.scale;
+    Surface { fill: Palette.raised; texture: 2; outline: focus.has-focus ? 1px : 0px; stroke: Palette.teal; }
+    Label { x: 10px; width: parent.width - 40px; height: parent.height; text: root.model[root.current-index]; }
+    for i in 4: Rectangle { x: root.width - 24px + i * 2px; y: root.height/2 - 3px + i * 2px; width: 2px; height: 2px; background: Palette.muted; }
+    for i in 3: Rectangle { x: root.width - 16px + i * 2px; y: root.height/2 + 1px - i * 2px; width: 2px; height: 2px; background: Palette.muted; }
+    focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if event.text == Key.DownArrow { root.current-index = min(root.model.length - 1,root.current-index + 1); root.selected(); return accept; }
+            if event.text == Key.UpArrow { root.current-index = max(0,root.current-index - 1); root.selected(); return accept; }
+            if event.text == " " || event.text == "\n" { popup.show(); return accept; }
+            return reject;
+        }
+    }
+    TouchArea { enabled: root.enabled; clicked => { focus.focus(); popup.show(); } }
+    popup := PopupWindow {
+        close-policy: close-on-click-outside;
+        y: root.height; width: root.width; height: min(260px,root.model.length * 38px * Palette.scale + 28px * Palette.scale);
+        Surface { outline: 1px; }
+        options := ListView {
+            x: 2px; y: round(14 * Palette.scale) * 1px; width: parent.width - 2px - options-scroll.width; height: parent.height - 2 * self.y;
+            vertical-scrollbar-policy: always-off; horizontal-scrollbar-policy: always-off;
+            for name[index] in root.model: Rectangle {
+                height: 38px * Palette.scale;
+                if index == root.current-index || touch.has-hover: Surface { fill: Palette.raised; texture: 2; }
+                Label { x: 8px; width: parent.width - 16px; height: parent.height; text: name; color: index == root.current-index ? Palette.teal : Palette.ink; }
+                touch := TouchArea { clicked => { root.current-index = index; root.selected(); popup.close(); } }
+            }
+        }
+        options-scroll := PixelScrollBar {
+            x: parent.width - self.width; height: parent.height;
+            viewport-height: options.height; content-height: options.content-height; content-y <=> options.content-y;
+            enabled: root.enabled;
+        }
+    }
+    forward-focus: focus;
+    accessible-role: combobox; accessible-enabled: enabled; accessible-value: root.model[root.current-index];
+    accessible-action-expand => { if root.enabled { popup.show(); } }
+}
+
+component ConnectionArtwork inherits Image {
+    image-rendering: pixelated;
+    accessible-role: image;
+}
+
+export component AppWindow inherits Window {
+    in property <bool> boot-active: true;
+    in property <string> boot-status: I18n.tr("Загружаем профили и правила…");
+    in property <string> boot-error;
+    in property <bool> boot-retry-enabled;
+    private property <float> main-reveal: root.boot-active ? 0 : 1;
+    animate main-reveal { duration: root.animation && root.effects ? 240ms : 0ms; easing: ease-out; }
+    changed boot-active => { Interaction.blocked = self.boot-active || self.dialog != 0; }
+    in property <bool> mobile: false;
+    in property <bool> background-available: true;
+    in property <string> startup-label: I18n.tr("Запуск с Windows");
+    in property <string> startup-description: I18n.tr("При входе в Windows приложение запустится в трее.\nVPN подключится к последнему включённому серверу,\nесли включено автоподключение.");
+    private property <length> safe-top: root.mobile ? root.safe-area-insets.top : 0px;
+    private property <length> safe-bottom: root.mobile ? root.safe-area-insets.bottom : 0px;
+    private property <length> safe-left: root.mobile ? root.safe-area-insets.left : 0px;
+    private property <length> safe-right: root.mobile ? root.safe-area-insets.right : 0px;
+    private property <length> content-width: root.width - root.safe-left - root.safe-right;
+    private property <length> content-height: max(0px, root.height - root.safe-top - root.safe-bottom);
+    title: "Mukhomor";
+    no-frame: true;
+    preferred-width: 560px; preferred-height: 740px;
+    min-width: 360px; min-height: 580px;
+    background: transparent;
+    default-font-family: "Tiny5"; default-font-size: 24px * Palette.scale;
+    in property <[Profile]> profiles;
+    in property <string> selected-id;
+    in property <string> selected-name;
+    in property <string> status-text;
+    in property <string> phase: "loading";
+    in property <string> primary-text;
+    in property <bool> primary-enabled;
+    in property <bool> ready;
+    in property <bool> busy;
+    in property <string> notice;
+    in property <bool> notice-error;
+    in property <image> hero-image;
+    in property <image> app-icon;
+    in property <image> system-icon;
+    in property <bool> protected;
+    in property <bool> loaded;
+    in property <bool> light-theme;
+    changed light-theme => { WidgetPalette.color-scheme = self.light-theme ? ColorScheme.light : ColorScheme.dark; }
+    out property <length> navigation-bottom: navigation.y + navigation.height;
+    in-out property <int> page;
+    in-out property <int> dialog;
+    changed dialog => { Interaction.blocked = self.boot-active || self.dialog != 0; }
+    in-out property <string> dialog-id;
+    in-out property <string> dialog-name;
+    in-out property <string> import-text;
+    in-out property <string> import-source;
+    in property <bool> dirty;
+    in-out property <int> rule-section;
+    in-out property <string> rules-text;
+    in-out property <bool> full-routing;
+    in-out property <bool> allow-lan;
+    in-out property <bool> autoconnect;
+    in-out property <bool> autostart;
+    in property <bool> autostart-available;
+    in property <bool> routing-editable;
+    in property <[string]> theme-names;
+    in-out property <int> theme-index;
+    in-out property <int> language-index;
+    in-out property <int> scale-index: 1;
+    in-out property <bool> effects <=> Art.effects;
+    in-out property <bool> animation;
+    in property <int> animation-speed: 100;
+    in-out property <bool> rounding;
+    in property <string> rule-issues;
+    in property <[Preset]> presets;
+    in property <[string]> rule-owners;
+    in-out property <int> rule-owner;
+    in-out property <bool> section-enabled: true;
+    in-out property <bool> source-russia;
+    in-out property <bool> source-steam;
+    in-out property <bool> source-ozon;
+    in-out property <bool> source-games;
+    in-out property <string> preset-description;
+    in property <[string]> template-names;
+    in-out property <int> template-index;
+    callback command(string, string, string);
+    callback edit-rules(string);
+    callback worker-wakeup();
+    icon: system-icon;
+
+
+    in property <image> hero-connected-image;
+    in-out property <image> background-image <=> Art.background;
+    in-out property <image> panel-texture <=> Art.panel;
+    in-out property <image> raised-texture <=> Art.raised;
+    in-out property <image> accent-texture <=> Art.accent;
+    in-out property <image> check-icon <=> Art.check;
+    in property <image> arrow-icon;
+    in property <image> close-icon;
+    in property <image> minimize-icon;
+    in property <[image]> navigation-icons;
+    in-out property <float> texture-width <=> Art.width;
+    in-out property <float> texture-height <=> Art.height;
+    in property <bool> show-roots;
+    in-out property <bool> appearance-open;
+    in-out property <string> new-preset-name;
+    in-out property <string> chosen-preset-id;
+    in-out property <string> chosen-preset-name;
+    in-out property <string> chosen-preset-description;
+    callback minimize-window();
+    callback close-window();
+    private property <length> margin: root.content-width < 450px ? 16px : max(24px, (root.content-width - 520px * Palette.scale)/2);
+    private property <bool> compact: root.content-height < 680px * Palette.scale;
+    private property <length> footer: root.content-height - 104px * Palette.scale;
+    private property <length> actions-y: root.footer - 42px * Palette.scale;
+    private property <length> list-y: (root.compact ? 280px : 352px) * Palette.scale + (root.notice != "" ? 36px : 0px);
+    private property <length> row-height: 44px * Palette.scale;
+    out property <length> server-list-width: server-list.width;
+    out property <length> server-content-width: server-view.width;
+    out property <length> server-content-top: server-list.y + server-view.y;
+    out property <length> server-content-bottom: server-list.y + server-view.y + server-view.height;
+    out property <length> server-list-top: server-list.y;
+    out property <length> server-list-bottom: server-list.y + server-list.height;
+    out property <length> server-scroll-center-x: server-list.x + server-scroll.x + server-scroll.width/2;
+    out property <length> server-scroll-top: server-list.y + server-scroll.track-y;
+    out property <length> server-scroll-bottom: server-list.y + server-scroll.track-y + server-scroll.track-height;
+    out property <length> primary-action-top: root.actions-y;
+    out property <length> server-row-height: root.row-height;
+    out property <length> server-scroll-offset: server-view.content-y;
+    out property <length> server-scroll-maximum: max(0px, server-view.content-height - server-view.height);
+    public function scroll-servers(fraction: float) { server-view.content-y = -max(0px, server-view.content-height - server-view.height) * clamp(fraction,0,1); }
+
+    Rectangle {
+        x: root.safe-left; y: root.safe-top;
+        width: root.content-width; height: root.content-height;
+    canvas := Rectangle {
+        clip: true;
+        changed absolute-position => { Art.origin = self.absolute-position; }
+        init => { Art.origin = self.absolute-position; }
+        PixelShape { texture: 0; fill: Palette.background; }
+    }
+    // Keep the same moving field throughout launch and the main application.
+    Rectangle {
+    opacity: root.main-reveal;
+    visible: root.main-reveal > 0;
+    WindowMoveArea {
+        x: 0px; y: 0px; width: root.content-width;
+        height: 88px * Palette.scale;
+        enabled: root.dialog == 0 && !root.mobile;
+        Image { source: root.app-icon; x: root.margin - 6px; y: 20px * Palette.scale; width: 48px * Palette.scale; height: self.width; image-rendering: pixelated; }
+        Label { x: root.margin + 48px * Palette.scale; y: 25px * Palette.scale; height: 32px * Palette.scale; text: "Mukhomor"; }
+        Hint { x: root.margin + 170px * Palette.scale; y: 31px * Palette.scale; height: 24px * Palette.scale; text: "v0.8.1"; }
+        if !root.mobile: Action { x: root.content-width - 90px * Palette.scale; y: 24px * Palette.scale; width: 28px * Palette.scale; height: 28px * Palette.scale; glyph: root.minimize-icon; flat: true; clicked => { root.minimize-window(); } }
+        if !root.mobile: Action { x: root.content-width - 54px * Palette.scale; y: 24px * Palette.scale; width: 28px * Palette.scale; height: 28px * Palette.scale; glyph: root.close-icon; flat: true; clicked => { root.close-window(); } }
+    }
+    // Open hero composition, exactly as the original 560 × 740 layout.
+    if root.page == 0: Rectangle {
+        hero := Rectangle {
+            x: (root.content-width - self.width)/2; y: (root.compact ? 88px : 96px) * Palette.scale;
+            width: 240px * Palette.scale; height: (root.compact ? 160px : 196px) * Palette.scale;
+            // The shared artwork below moves here when preparation completes.
+            Label {
+                y: parent.height - 40px * Palette.scale; height: 31px * Palette.scale;
+                width: parent.width; text: root.primary-text;
+                horizontal-alignment: center;
+                color: hero-touch.has-hover || hero-focus.has-focus ? Palette.teal : Palette.ink;
+            }
+            hero-focus := FocusScope {
+                enabled: root.primary-enabled && root.dialog == 0;
+                key-pressed(event) => { if event.text == " " || event.text == "\n" { root.command("primary", "", ""); return accept; } return reject; }
+            }
+            hero-touch := TouchArea { enabled: root.primary-enabled && root.dialog == 0; clicked => { hero-focus.focus(); root.command("primary", "", ""); } }
+            accessible-role: button; accessible-label: root.primary-text; accessible-description: root.status-text;
+            accessible-enabled: root.primary-enabled;
+            accessible-action-default => { if root.primary-enabled && root.dialog == 0 { root.command("primary", "", ""); } }
+        }
+        if root.notice != "": Hint {
+            x: root.margin; y: root.list-y - 64px * Palette.scale;
+            width: root.content-width - 2 * root.margin; height: 36px * Palette.scale;
+            text: root.notice; wrap: word-wrap; horizontal-alignment: center;
+            color: root.notice-error ? Palette.danger : Palette.muted;
+        }
+        Hint { x: root.margin; y: root.list-y - 32px * Palette.scale; height: 20px * Palette.scale; text: I18n.tr("СЕРВЕРЫ") + " · " + root.profiles.length; }
+        if root.phase == "idle" && !root.busy && root.content-width >= 450px: Hint {
+            x: root.content-width/2; y: root.list-y - 28px * Palette.scale;
+            width: root.content-width/2-root.margin; height: 20px * Palette.scale;
+            horizontal-alignment: right; text: I18n.tr("Выбери и подключись");
+        }
+    }
+    // This is the one original list surface. The scrollbar belongs to it and
+    // always has its own internal lane, whether the list overflows or not.
+    server-list := Rectangle {
+        visible: root.page == 0;
+        x: root.margin; y: root.list-y;
+        width: root.content-width - 2 * root.margin;
+        height: max(root.row-height, root.actions-y - 20px * Palette.scale - self.y);
+        if root.profiles.length > 0: Surface { }
+        if root.profiles.length == 0: VerticalLayout {
+            padding: 12px; alignment: center; spacing: 14px;
+            Label { text: I18n.tr("Первый сервер ждёт тебя"); wrap: word-wrap; horizontal-alignment: center; }
+            Hint { text: I18n.tr("Добавь файл конфигурации или ссылку"); wrap: word-wrap; horizontal-alignment: center; }
+        }
+        server-view := ListView {
+            x: 0px; y: 0px;
+            vertical-scrollbar-policy: always-off; horizontal-scrollbar-policy: always-off;
+            width: parent.width - server-scroll.width; height: parent.height;
+            content-width: self.width;
+            content-height: root.profiles.length * root.row-height;
+            enabled: root.dialog == 0;
+            for profile[index] in root.profiles: Rectangle {
+                height: root.row-height; width: server-view.width;
+                if profile.selected || row-focus.has-focus: Surface {
+                    x: 2px; y: 1px; width: parent.width - 4px; height: parent.height - 2px;
+                    fill: Palette.raised; texture: 2; outline: row-focus.has-focus ? 1px : 0px; stroke: Palette.teal;
+                }
+                Image { source: profile.selected ? root.check-icon : root.arrow-icon; x: 16px * Palette.scale; y: 10px * Palette.scale; width: 24px * Palette.scale; height: self.width; colorize: profile.selected ? Palette.teal : Palette.muted; image-rendering: pixelated; }
+                Label {
+                    x: 52px * Palette.scale; y: -4px * Palette.scale; height: parent.height;
+                    width: parent.width - self.x - 16px * Palette.scale - (protocol.visible ? protocol.width+12px : 0px);
+                    text: profile.name;
+                }
+                protocol := Hint { visible: profile.protocol != "" && root.content-width >= 450px; text: profile.protocol; width: min(self.preferred-width,80px * Palette.scale); x: parent.width - 16px * Palette.scale - self.width; height: parent.height; }
+                row-focus := FocusScope {
+                    enabled: root.ready && !root.busy && root.dialog == 0;
+                    key-pressed(event) => {
+                        if event.text == " " || event.text == "\n" { root.command("Select", profile.id, ""); return accept; }
+                        return reject;
+                    }
+                    TouchArea { enabled: root.ready && !root.busy && root.dialog == 0; clicked => { parent.focus(); root.command("Select", profile.id, ""); } }
+                }
+                accessible-role: list-item; accessible-label: profile.name + ", " + profile.protocol;
+                accessible-item-selected: profile.selected;
+            }
+        }
+        if root.profiles.length > 0: ListCornerCutouts { }
+        server-scroll := PixelScrollBar {
+            x: parent.width - self.width; height: parent.height;
+            viewport-height: server-view.height; content-height: server-view.content-height; content-y <=> server-view.content-y;
+            enabled: root.dialog == 0;
+        }
+    }
+    if root.page == 0: HorizontalLayout {
+        x: root.margin; y: root.actions-y; width: root.content-width - 2 * root.margin; height: 42px * Palette.scale; spacing: 8px;
+        Action { text: "+ " + I18n.tr("Добавить конфигурацию"); text-size: root.content-width < 450px ? 18px : 24px * Palette.scale; primary: true; enabled: root.ready && !root.busy; clicked => { root.dialog = 1; } }
+        if root.selected-id != "": Action {
+            width: 48px * Palette.scale; text: "…"; enabled: !root.busy;
+            clicked => { root.dialog-id = root.selected-id; root.dialog-name = root.selected-name; root.dialog = 2; }
+        }
+    }
+
+    if root.page == 1: VerticalLayout {
+        x: root.margin; y: 108px * Palette.scale; width: root.content-width - 2 * root.margin; height: root.footer - self.y;
+        spacing: 8px;
+        Label { text: I18n.tr("Правила"); font-size: 32px * Palette.scale; max-height: 42px * Palette.scale; }
+        Hint { text: I18n.tr("Шесть типов правил. Свои списки и готовые наборы."); wrap: word-wrap; max-height: 30px * Palette.scale; }
+        for row in 2: HorizontalLayout {
+            spacing: 8px;
+            for col in 3: Action {
+                compact: true;
+                text-size: root.content-width < 450px ? 16px : 24px * Palette.scale;
+                text: [I18n.tr("Имена .exe"), I18n.tr("Пути .exe"), I18n.tr("Домены"), I18n.tr("Поддомены"), "IP / CIDR", I18n.tr("Через VPN")][row * 3 + col];
+                selected: root.rule-section == row * 3 + col;
+                clicked => { root.rule-section = row * 3 + col; root.command("rule-section", "", ""); }
+            }
+        }
+        Rectangle { height: 2px; }
+        HorizontalLayout {
+            spacing: 12px;
+            Choice { enabled: root.dialog == 0; model: root.rule-owners; current-index <=> root.rule-owner; selected => { root.command("rule-owner", "", ""); } }
+            Action { compact: true; width: root.content-width < 450px ? 48px : 144px * Palette.scale; text: root.content-width < 450px ? "…" : I18n.tr("Параметры"); clicked => { root.dialog = 10; } }
+        }
+        Hint { text: I18n.tr("По одному правилу на строку"); height: 30px * Palette.scale; }
+        Editor { text <=> root.rules-text; enabled: root.dialog == 0 && root.loaded; vertical-stretch: 1; min-height: 60px; edited => { root.edit-rules(self.text); } }
+        if root.rule-issues != "": Action { compact: true; text: I18n.tr("Результаты проверки"); clicked => { root.dialog = 7; } }
+        HorizontalLayout {
+            spacing: 12px;
+            Action { text: I18n.tr("Проверить"); enabled: root.ready && !root.busy; clicked => { root.command("ValidateSettings", "", ""); } }
+            Action { text: I18n.tr("Сохранить"); primary: true; enabled: root.dirty && root.ready && !root.busy; clicked => { root.command("ApplySettings", "", ""); } }
+        }
+        Hint { text: I18n.tr("Сохранить применит изменения во всех наборах."); wrap: word-wrap; height: 24px; }
+    }
+    if root.page == 2: VerticalLayout {
+        x: root.margin; y: 108px * Palette.scale; width: root.content-width - 2 * root.margin; height: root.footer - self.y;
+        spacing: 10px;
+        Label { text: I18n.tr("Наборы"); font-size: 32px * Palette.scale; max-height: 42px * Palette.scale; }
+        Hint { text: I18n.tr("Создайте набор, включите его и настройте правила."); wrap: word-wrap; max-height: 30px * Palette.scale; }
+        Hint { text: I18n.tr("Название нового набора"); height: 20px * Palette.scale; }
+        HorizontalLayout {
+            spacing: 12px;
+            Field { text <=> root.new-preset-name; enabled: root.dialog == 0 && !root.busy; }
+            Action { text: I18n.tr("Создать"); width: 132px * Palette.scale; enabled: root.new-preset-name != "" && !root.busy; clicked => { root.dialog-name = root.new-preset-name; root.preset-description = ""; root.command("preset-create", "", root.new-preset-name); } }
+        }
+        HorizontalLayout {
+            spacing: 12px;
+            Action { text: "+ " + I18n.tr("Готовый"); text-size: root.content-width < 450px ? 16px : 24px * Palette.scale; clicked => { root.dialog = 11; } }
+            Action { text: I18n.tr("Импорт"); text-size: root.content-width < 450px ? 16px : 24px * Palette.scale; clicked => { root.command("preset-import", "", ""); } }
+            Action { text: I18n.tr("Экспорт"); text-size: root.content-width < 450px ? 16px : 24px * Palette.scale; enabled: root.chosen-preset-id != ""; clicked => { root.command("preset-export", root.chosen-preset-id, ""); } }
+        }
+        Hint { text: I18n.tr("МОИ НАБОРЫ"); height: 20px * Palette.scale; }
+        Surface {
+            min-height: 88px; vertical-stretch: 1;
+            presets-view := ListView {
+                x: 0px; y: 0px;
+                width: parent.width - presets-scroll.width; height: parent.height;
+                vertical-scrollbar-policy: always-off; horizontal-scrollbar-policy: always-off;
+                enabled: root.dialog == 0;
+                for preset in root.presets: Rectangle {
+                    height: 44px * Palette.scale;
+                    if root.chosen-preset-id == preset.id: Surface { texture: 2; fill: Palette.raised; }
+                    PixelCheckBox {
+                        x: 0px; y: 0px; width: 44px * Palette.scale; height: parent.height;
+                        checked: preset.enabled; text: preset.name; enabled: root.dialog == 0 && !root.busy;
+                        toggled => { root.command("preset-toggle", preset.id, ""); }
+                    }
+                    Label { x: 46px * Palette.scale; width: parent.width - self.x - 12px; height: parent.height; text: preset.name; color: preset.enabled ? Palette.ink : Palette.muted; }
+                    FocusScope {
+                        x: 44px * Palette.scale; width: parent.width - self.x;
+                        enabled: root.dialog == 0;
+                        key-pressed(event) => { if event.text == " " || event.text == "\n" { root.chosen-preset-id = preset.id; root.chosen-preset-name = preset.name; root.chosen-preset-description = preset.description; return accept; } return reject; }
+                        TouchArea { enabled: root.dialog == 0; clicked => { parent.focus(); root.chosen-preset-id = preset.id; root.chosen-preset-name = preset.name; root.chosen-preset-description = preset.description; } }
+                    }
+                    accessible-role: list-item; accessible-label: preset.name; accessible-item-selected: root.chosen-preset-id == preset.id;
+                }
+            }
+            ListCornerCutouts { }
+            presets-scroll := PixelScrollBar {
+                x: parent.width - self.width; height: parent.height;
+                viewport-height: presets-view.height; content-height: presets-view.content-height; content-y <=> presets-view.content-y;
+                enabled: root.dialog == 0;
+            }
+        }
+        Hint { text: I18n.tr("Галочка включает набор. Правила редактируются отдельно."); wrap: word-wrap; height: 30px * Palette.scale; }
+        HorizontalLayout {
+            spacing: 12px;
+            Action { text: I18n.tr("Правила"); text-size: root.content-width < 450px ? 16px : 24px * Palette.scale; enabled: root.chosen-preset-id != ""; clicked => { root.command("preset-edit", root.chosen-preset-id, ""); } }
+            Action { text: "…"; enabled: root.chosen-preset-id != ""; clicked => { root.dialog-id = root.chosen-preset-id; root.dialog-name = root.chosen-preset-name; root.preset-description = root.chosen-preset-description; root.dialog = 4; } }
+            Action { text: I18n.tr("Сохранить"); text-size: root.content-width < 450px ? 16px : 24px * Palette.scale; primary: true; enabled: root.dirty && root.ready && !root.busy; clicked => { root.command("ApplySettings", "", ""); } }
+        }
+        Hint { text: I18n.tr("Сохранить применит изменения во всех наборах."); wrap: word-wrap; height: 24px; }
+    }
+    if root.page == 3: PageScroll {
+        x: root.margin; y: 108px * Palette.scale; width: root.content-width - root.margin; height: root.content-height - 84px * Palette.scale - self.y;
+        gutter: root.margin;
+        enabled: root.dialog == 0;
+        VerticalLayout {
+            spacing: 0px;
+            HorizontalLayout {
+                Label { text: root.appearance-open ? I18n.tr("Оформление") : I18n.tr("Настройки"); font-size: 32px * Palette.scale; }
+                Action { width: root.content-width < 450px ? 48px : 180px * Palette.scale; text: root.appearance-open ? "←" : root.content-width < 450px ? "…" : I18n.tr("Оформление"); clicked => { root.appearance-open = !root.appearance-open; } }
+            }
+            Hint { text: root.appearance-open ? I18n.tr("Твой стиль. Твой размер. Без перезапуска.") : I18n.tr("Твой VPN. Твои привычки."); height: 42px * Palette.scale; wrap: word-wrap; }
+            if !root.appearance-open: VerticalLayout {
+                spacing: 0px;
+                Surface {
+                    height: 220px * Palette.scale; outline: 1px;
+                    VerticalLayout {
+                        padding: 14px; spacing: 6px;
+                        if !root.mobile: Toggle { text: root.startup-label; checked <=> root.autostart; enabled: root.dialog == 0 && root.autostart-available; toggled => { root.command("autostart", "", ""); } }
+                        if root.mobile: Action { compact: true; text: I18n.tr("Системные настройки VPN"); clicked => { root.command("vpn-settings", "", ""); } }
+                        Toggle { text: I18n.tr("Автоподключение VPN"); checked <=> root.autoconnect; enabled: root.dialog == 0 && root.ready && !root.busy; toggled => { root.command("autoconnect", "", ""); } }
+                        Hint { text: root.startup-description; wrap: word-wrap; vertical-alignment: top; vertical-stretch: 1; }
+                    }
+                }
+                Rectangle { height: 24px * Palette.scale; }
+                Hint { text: I18n.tr("ЯЗЫК ИНТЕРФЕЙСА"); height: 32px * Palette.scale; }
+                Rectangle { height: 4px; }
+                HorizontalLayout {
+                    spacing: 12px;
+                    for language[index] in [I18n.tr("Авто"), "Русский", "English"]: Action { text: language; text-size: root.content-width < 450px ? 18px : 24px * Palette.scale; selected: root.language-index == index; clicked => { root.language-index = index; root.command("language", "", ""); } }
+                }
+                Rectangle { height: 28px * Palette.scale; }
+                Hint { text: I18n.tr("ЛЕГКО В ФОНЕ"); height: 30px * Palette.scale; }
+                Hint { text: root.mobile ? I18n.tr("VPN продолжает работать в фоне. Отключить его можно здесь или в уведомлении.") : root.background-available ? I18n.tr("Можно закрыть окно — подключение продолжит работать.\nВ трее интерфейс ждёт без фоновой перерисовки.") : I18n.tr("Системный трей недоступен. Закрытие окна отключает VPN и завершает приложение."); wrap: word-wrap; height: 42px * Palette.scale; }
+                Action { text: root.mobile ? I18n.tr("Свернуть") : root.background-available ? I18n.tr("Свернуть в трей") : I18n.tr("Выход"); clicked => { root.close-window(); } }
+                Rectangle { height: 32px * Palette.scale; }
+                Hint { text: I18n.tr("ЕСЛИ ЧТО-ТО ПОШЛО НЕ ТАК"); height: 32px * Palette.scale; }
+                Action { text: I18n.tr("Диагностика"); enabled: root.ready && !root.busy; clicked => { root.command("Diagnose", "", ""); } }
+                Rectangle { height: 12px; }
+                Action { text: I18n.tr("Обновить списки и IP"); enabled: root.ready && !root.busy; clicked => { root.command("Update", "", ""); } }
+                Rectangle { height: 32px * Palette.scale; }
+                Hint { text: I18n.tr("МАРШРУТИЗАЦИЯ"); height: 32px * Palette.scale; }
+                Toggle { text: I18n.tr("Весь трафик через VPN"); checked <=> root.full-routing; enabled: root.dialog == 0 && root.routing-editable; toggled => { root.command("routing", "", ""); } }
+                Rectangle { height: 8px; }
+                Toggle { text: I18n.tr("Доступ к локальной сети"); checked <=> root.allow-lan; enabled: root.dialog == 0 && root.routing-editable; toggled => { root.command("routing", "", ""); } }
+                Rectangle { height: 24px; }
+                Rectangle { height: 12px; }
+                Action { text: I18n.tr("Отключить VPN и выйти"); clicked => { root.command("Exit", "", ""); } }
+                Rectangle { height: 12px; }
+                Action { text: I18n.tr("О приложении"); clicked => { root.dialog = 8; } }
+            }
+            if root.appearance-open: VerticalLayout {
+                spacing: 16px;
+                Choice { enabled: root.dialog == 0; model: root.theme-names; current-index <=> root.theme-index; selected => { root.command("appearance", "", ""); } }
+                HorizontalLayout { spacing: 12px;
+                    for size[index] in [I18n.tr("Маленький"), I18n.tr("Средний"), I18n.tr("Большой")]: Action { text: size; selected: root.scale-index == index; clicked => { root.scale-index = index; root.command("appearance", "", ""); } }
+                }
+                Toggle { text: I18n.tr("Эффекты"); checked <=> root.effects; enabled: root.dialog == 0; toggled => { root.command("appearance", "", ""); } }
+                Toggle { text: I18n.tr("Анимация"); checked <=> root.animation; enabled: root.dialog == 0; toggled => { root.command("appearance", "", ""); } }
+                Toggle { text: I18n.tr("Скругления"); checked <=> root.rounding; enabled: root.dialog == 0; toggled => { root.command("appearance", "", ""); } }
+            }
+        }
+    }
+    if root.page != 0 && root.notice != "": Hint {
+        x: root.margin; y: 78px; width: root.content-width - 2 * root.margin; height: 28px;
+        text: root.notice; wrap: word-wrap; color: root.notice-error ? Palette.danger : Palette.muted;
+    }
+    if root.dirty && root.page != 1 && root.page != 2: HorizontalLayout {
+        x: root.margin; y: root.footer + 2px; width: root.content-width - 2 * root.margin; height: 20px;
+        Hint { text: I18n.tr("Не сохранено"); color: Palette.teal; }
+        Action { compact: true; text: I18n.tr("Сохранить"); enabled: root.ready && !root.busy; clicked => { root.command("ApplySettings", "", ""); } }
+    }
+    navigation := HorizontalLayout {
+        y: root.content-height - 80px * Palette.scale; height: 80px * Palette.scale; width: root.content-width;
+        for title[index] in [I18n.tr("Подключение"), I18n.tr("Правила"), I18n.tr("Наборы"), I18n.tr("Настройки")]: Rectangle {
+            if tab-focus.has-focus: Surface { x: 8px; y: 6px; width: parent.width - 16px; height: parent.height - 12px; texture: 0; fill: Palette.background; stroke: Palette.teal; outline: 1px; }
+            Image { source: root.navigation-icons[index]; y: 14px * Palette.scale; x: (parent.width - self.width)/2; width: 24px * Palette.scale; height: self.width; image-rendering: pixelated; colorize: root.page == index ? Palette.teal : Palette.muted; }
+            Hint { text: title; y: 50px * Palette.scale; width: parent.width; height: 20px * Palette.scale; font-size: root.content-width < 450px ? 13px : 16px * Palette.scale; horizontal-alignment: center; color: root.page == index ? Palette.teal : Palette.muted; }
+            tab-focus := FocusScope {
+                enabled: root.dialog == 0;
+                key-pressed(event) => { if event.text == " " || event.text == "\n" { root.page = index; return accept; } return reject; }
+                TouchArea { enabled: root.dialog == 0; clicked => { parent.focus(); root.page = index; } }
+            }
+            accessible-role: tab; accessible-label: title; accessible-item-selected: root.page == index;
+        }
+    }
+    if root.dialog > 0: Rectangle {
+        PixelShape { fill: #000000b0; }
+        TouchArea {} // Block pointer interaction with the page behind the dialog.
+        Surface {
+            width: min(520px * Palette.scale, parent.width - 32px);
+            height: min(parent.height - 48px, (root.dialog == 2 ? 340px : root.dialog == 3 || root.dialog == 6 ? 280px : root.dialog == 9 ? 350px : 580px) * Palette.scale);
+            x: (parent.width - self.width)/2; y: (parent.height - self.height)/2;
+            outline: 1px;
+            VerticalLayout {
+                padding: 18px; spacing: 12px;
+                HorizontalLayout {
+                    spacing: 12px * Palette.scale;
+                    Label { text: root.dialog == 1 ? I18n.tr("Добавить конфигурацию") : root.dialog <= 3 ? I18n.tr("Сервер") : root.dialog <= 6 ? I18n.tr("Набор правил") : root.dialog == 7 ? I18n.tr("Результаты проверки") : root.dialog == 8 ? I18n.tr("О приложении") : root.dialog == 10 || root.dialog == 11 ? I18n.tr("Параметры") : I18n.tr("Несохранённые изменения"); font-size: 24px * Palette.scale; wrap: word-wrap; min-width: 0px; horizontal-stretch: 1; }
+                    ModalAction {
+                        glyph: root.close-icon; glyph-size: 8px * max(1,round(4 * Palette.scale)); glyph-color: Palette.ink;
+                        width: 48px * Palette.scale; height: self.width; flat: true;
+                        accessible-label: I18n.tr("Закрыть"); enabled: !root.busy; clicked => { root.dialog = 0; }
+                    }
+                }
+                if root.dialog < 7 && root.dialog != 3 && root.dialog != 6: Label { text: I18n.tr("Название"); }
+                if root.dialog < 7 && root.dialog != 3 && root.dialog != 6: Field { text <=> root.dialog-name; enabled: !root.busy; }
+                if root.notice != "": Label { text: root.notice; wrap: word-wrap; color: root.notice-error ? Palette.danger : Palette.ink; }
+                if root.dialog == 1: VerticalLayout {
+                    spacing: 12px;
+                    Label { text: I18n.tr("Вставьте конфигурацию или выберите файл"); wrap: word-wrap; color: Palette.muted; }
+                    Editor { text <=> root.import-text; read-only: root.busy; vertical-stretch: 1; min-height: 140px; wrap: word-wrap; }
+                    ModalAction { text: I18n.tr("Выбрать файл"); enabled: !root.busy; clicked => { root.command("import-file", "", ""); } }
+                    ModalAction { text: root.busy ? I18n.tr("Добавляем…") : I18n.tr("Импортировать"); primary: true; enabled: root.ready && !root.busy && root.import-text != ""; clicked => { root.command("Import", "", ""); } }
+                }
+                if root.dialog == 2: VerticalLayout {
+                    spacing: 12px;
+                    ModalAction { text: I18n.tr("Переименовать"); enabled: !root.busy && root.dialog-name != ""; clicked => { root.command("Rename", root.dialog-id, root.dialog-name); } }
+                    Rectangle { vertical-stretch: 1; }
+                    Label { text: I18n.tr("Удаление конфигурации нельзя отменить"); color: Palette.danger; wrap: word-wrap; }
+                    ModalAction { text: I18n.tr("Удалить конфигурацию"); enabled: !root.busy; clicked => { root.dialog = 3; } }
+                }
+                if root.dialog == 3: VerticalLayout {
+                    Label { text: I18n.tr("Удалить конфигурацию?"); wrap: word-wrap; color: Palette.danger; }
+                    Rectangle { vertical-stretch: 1; }
+                    ModalAction { text: I18n.tr("Отмена"); clicked => { root.dialog = 2; } }
+                    ModalAction { text: I18n.tr("Удалить"); enabled: !root.busy; clicked => { root.command("Remove", root.dialog-id, ""); } }
+                }
+                if root.dialog == 4 || root.dialog == 5: VerticalLayout {
+                    spacing: 10px;
+                    Label { text: I18n.tr("Описание"); }
+                    Editor { text <=> root.preset-description; vertical-stretch: 1; min-height: 80px; wrap: word-wrap; }
+                    ModalAction { text: I18n.tr("Сохранить"); primary: true; clicked => { root.command(root.dialog == 5 ? "preset-create" : "preset-rename", root.dialog-id, root.dialog-name); } }
+                    if root.dialog == 4: VerticalLayout {
+                        spacing: 10px;
+                        ModalAction { text: I18n.tr("Экспортировать"); clicked => { root.command("preset-export", root.dialog-id, ""); } }
+                        ModalAction { text: I18n.tr("Восстановить правила шаблона"); clicked => { root.command("preset-restore", root.dialog-id, ""); } }
+                        ModalAction { text: I18n.tr("Удалить набор"); clicked => { root.dialog = 6; } }
+                    }
+                }
+                if root.dialog == 6: VerticalLayout {
+                    Label { text: I18n.tr("Удалить набор правил?"); color: Palette.danger; wrap: word-wrap; }
+                    Rectangle { vertical-stretch: 1; }
+                    ModalAction { text: I18n.tr("Отмена"); clicked => { root.dialog = 4; } }
+                    ModalAction { text: I18n.tr("Удалить"); clicked => { root.command("preset-remove", root.dialog-id, ""); } }
+                }
+                if root.dialog == 7: Editor { text: root.rule-issues; read-only: true; wrap: word-wrap; vertical-stretch: 1; }
+                if root.dialog == 8: VerticalLayout {
+                    spacing: 16px;
+                    Label { text: "Mukhomor 0.8.0"; font-size: 25px; }
+                    Label { text: "Slint 1.18.1"; color: Palette.muted; }
+                    AboutSlint {}
+                    Rectangle { vertical-stretch: 1; }
+                }
+                if root.dialog == 10: VerticalLayout {
+                    spacing: 12px;
+                    if root.rule-owner > 0: Toggle { modal: true; text: I18n.tr("Этот раздел включён"); checked <=> root.section-enabled; toggled => { root.command("section-enabled", "", ""); } }
+            HorizontalLayout {
+                Toggle { modal: true; enabled: true;  text: "Russia"; checked <=> root.source-russia; toggled => { root.command("sources", "", ""); } }
+                Toggle { modal: true; enabled: true;  text: "Steam"; checked <=> root.source-steam; toggled => { root.command("sources", "", ""); } }
+            }
+            HorizontalLayout {
+                Toggle { modal: true; enabled: true;  text: "Ozon"; checked <=> root.source-ozon; toggled => { root.command("sources", "", ""); } }
+                Toggle { modal: true; enabled: true;  text: I18n.tr("Игры"); checked <=> root.source-games; toggled => { root.command("sources", "", ""); } }
+            }
+
+                }
+                if root.dialog == 11: VerticalLayout {
+                    spacing: 12px;
+                    Choice { model: root.template-names; current-index <=> root.template-index; }
+                    ModalAction { text: I18n.tr("Добавить из шаблона"); primary: true; clicked => { root.command("preset-template", "", ""); root.dialog = 0; } }
+                }
+                if root.dialog == 9: VerticalLayout {
+                    spacing: 12px;
+                    Label { text: I18n.tr("Сохранить изменения перед выходом?"); wrap: word-wrap; }
+                    Rectangle { vertical-stretch: 1; }
+                    ModalAction { text: I18n.tr("Сохранить и выйти"); enabled: root.ready && !root.busy; primary: true; clicked => { root.command("save-exit", "", ""); } }
+                    ModalAction { text: I18n.tr("Выйти без сохранения"); clicked => { root.command("discard-exit", "", ""); } }
+                    ModalAction { text: I18n.tr("Отмена"); clicked => { root.dialog = 0; } }
+                }
+            }
+        }
+    }
+    } // Main content; hidden until the controller has supplied usable state.
+    ConnectionArtwork {
+        source: root.show-roots && !root.boot-active ? root.hero-connected-image : root.hero-image;
+        visible: root.boot-active || (root.page == 0 && root.dialog == 0);
+        height: root.boot-active ? min(216px * Palette.scale, root.content-width * 0.6) : (root.compact ? 108px : 144px) * Palette.scale;
+        width: self.height * 80 / 72;
+        x: (root.content-width - self.width)/2;
+        y: root.boot-active ? (root.content-height - self.height)/2 - (root.boot-error == "" ? 24px : 96px) * min(Palette.scale, 1) : (root.compact ? 96px : 104px) * Palette.scale;
+        animate y, height { duration: root.animation && root.effects ? 320ms : 0ms; easing: ease-in-out; }
+        accessible-label: root.boot-active ? root.boot-status : root.status-text;
+    }
+    if root.boot-active: Rectangle {
+        TouchArea {} // The launch scene owns pointer input, never the VPN button.
+        if !root.mobile: WindowMoveArea {
+            x: 0px; y: 0px; width: root.content-width;
+            height: 64px * Palette.scale;
+            ModalAction { x: root.content-width - 54px * Palette.scale; y: 24px * Palette.scale; width: 28px * Palette.scale; height: self.width; glyph: root.close-icon; flat: true; enabled: true; clicked => { root.close-window(); } }
+        }
+        VerticalLayout {
+            x: 24px; y: root.content-height - (root.boot-error == "" ? 136px : 220px) * min(Palette.scale, 1);
+            width: root.content-width - 48px; height: (root.boot-error == "" ? 112px : 196px) * min(Palette.scale, 1);
+            spacing: 8px;
+            Label { text: "Mukhomor"; font-size: 36px * min(Palette.scale, 1.15); horizontal-alignment: center; height: 42px; }
+            Hint { text: root.boot-status; horizontal-alignment: center; wrap: word-wrap; min-height: 36px; }
+            if root.boot-error != "": Hint { text: root.boot-error; color: Palette.danger; wrap: word-wrap; horizontal-alignment: center; min-height: 46px; }
+            if root.boot-error != "": HorizontalLayout {
+                spacing: 12px;
+                ModalAction { text: I18n.tr("Повторить"); enabled: root.boot-retry-enabled; clicked => { root.command("boot-retry", "", ""); } }
+                ModalAction { text: I18n.tr("Открыть"); accessible-label: I18n.tr("Открыть приложение"); clicked => { root.command("boot-open", "", ""); } }
+            }
+        }
+    }
+    }
+}
+
+export component Tray inherits SystemTrayIcon {
+    in property <image> tray-icon;
+    icon: tray-icon;
+    tooltip: "Mukhomor";
+    callback show-window;
+    callback disconnect;
+    callback exit;
+    Menu {
+        MenuItem { title: "Mukhomor"; activated => { root.show-window(); } }
+        MenuItem { title: I18n.tr("Отключиться"); activated => { root.disconnect(); } }
+        MenuItem { title: I18n.tr("Выход"); activated => { root.exit(); } }
+    }
+}

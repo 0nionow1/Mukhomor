@@ -1,0 +1,75 @@
+/* Two complementary pixel faces; self-hosted, unmodified and licensed under OFL 1.1. */
+@font-face {
+  font-family: Monocraft;
+  src: url('assets/Monocraft-Regular.ttf') format('truetype');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+:root { --body: 'Monocraft', 'Tiny5', monospace; }
+
+/* Tiny5's larger blocks lead the page; Monocraft's finer grid carries reading. */
+body, code, .route-origin-note, .route-end,
+.footer-fine, .footer-heading, .footer-legal, .footer-settings,
+.faq-answer p, .privacy-copy p, .analytics-consent, .analytics-challenge {
+  font-family: var(--body);
+}
+body { font-size: 16px; line-height: 1.65; }
+h3, button, .button, .text-link, .header-nav, .docs-sidebar nav,
+.doc-details summary, .doc-next, .feature-notes strong, .scene-tagline,
+.principles, .footer-group a { font-family: var(--pixel); font-weight: 400; }
+.doc-section p, .doc-section li, .steps p, .doc-callout p, .doc-details p,
+.protocol-callout p, .faq-answer p, .privacy-copy p, .release-notes li {
+  font-size: 16px; line-height: 1.65;
+}
+.doc-section .doc-lead, .docs-heading > p:last-child,
+.story-intro p:not(.eyebrow) { font-size: 18px; line-height: 1.6; }
+#scenario-panel p, .feature-notes p, .ecosystem-intro > p,
+.connection-option p, .start-section p:not(.eyebrow), .preview-dialog > p {
+  font-size: 16px; line-height: 1.6;
+}
+#scenario-panel .scenario-detail, .protocol-note, .sidebar-note p,
+.story-download > span, .download-release-body p, .download-release-body li {
+  font-size: 14px; line-height: 1.65;
+}
+.route-origin-note, .route-end, .diagram-footnote, .footer-fine,
+.footer-legal, .footer-settings, .small-note, .copy-feedback {
+  font-size: 12px; line-height: 1.7;
+}
+.footer-settings button { font-family: inherit; }
+table, td, th { font-size: 14px; line-height: 1.6; }
+
+/* Technical labels share the reading face, with compact, consistent metrics. */
+code, .code-block code, kbd, samp,
+.eyebrow, .scene-eyebrow, .brand-caption, .status, .diagram-topline,
+.route-label, .option-number, .docs-sidebar nav a span,
+.download-release-meta time, .release-meta time {
+  font-family: var(--body); font-weight: 400;
+}
+code, .code-block code, kbd, samp {
+  font-size: 14px; line-height: 1.75; font-variant-ligatures: none;
+}
+.eyebrow, .doc-section .eyebrow, .scene-eyebrow {
+  font-size: 12px; line-height: 1.6; letter-spacing: .6px;
+}
+.brand-caption { font-size: 10px; letter-spacing: 1px; }
+.status { font-size: 12px; line-height: 1.5; }
+.diagram-topline, .route-label { font-size: 12px; letter-spacing: 0; }
+.option-number, .docs-sidebar nav a span { font-size: 14px; }
+.footer-heading { font-size: 12px; line-height: 1.5; letter-spacing: .6px; }
+.download-release-meta time, .release-meta time { font-size: 12px; line-height: 1.6; }
+.analytics-consent, .analytics-challenge { font-size: 16px; line-height: 1.6; }
+.analytics-consent .consent-detail { font-size: 14px; }
+
+/* Text may grow without pushing the illustration or mobile navigation sideways. */
+.scenario-copy { min-width: 0; }
+@media (max-width: 800px) {
+  .possibilities-layout { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 600px) {
+  .scene-eyebrow, .diagram-topline, .route-label { font-size: 11px; }
+  .docs-sidebar nav a span { font-size: 12px; }
+  .scenario-tabs button { padding-inline: 14px; }
+  .doc-section .doc-lead, .docs-heading > p:last-child,
+  .story-intro p:not(.eyebrow) { font-size: 16px; }
+}

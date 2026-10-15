@@ -1,4 +1,4 @@
-﻿Set-StrictMode -Version Latest
+Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 $package=[IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 # Inspect only files Git would publish. Do not read ignored profiles or parent folders.
@@ -11,6 +11,9 @@ if($packaged){
 }else{
     $files=@(& git.exe -C $package -c core.quotepath=false ls-files --cached --others --exclude-standard | Sort-Object -Unique)
     if($LASTEXITCODE -ne 0){throw 'Cannot enumerate public Git files'}
+    $deleted=@(& git.exe -C $package -c core.quotepath=false ls-files --deleted)
+    if($LASTEXITCODE -ne 0){throw 'Cannot enumerate deleted Git files'}
+    $files=@($files | Where-Object {$_ -notin $deleted})
 }
 if(!$files.Count){throw 'No public source files'}
 $issues=New-Object 'Collections.Generic.List[string]'
@@ -18,6 +21,13 @@ $checked=0
 # A privacy allowlist must also retain every required source dependency. These
 # files were previously present locally but excluded from a clean Git checkout.
 $required=@('TrafficGuard.psm1','native/src/cleanup_request.rs','native/src/setup_recovery.rs','native/src/traffic_guard.rs','native/src/traffic_guard_cli.rs','native/src/traffic_guard_tun.rs','tests/Set-OwnedTestRoot.ps1','tests/Test-PrivateAcl.ps1','tests/Test-Uninstall.ps1','tests/Test-ControllerRecovery.ps1','tests/Test-FullRouting.ps1','tests/Test-FullTrafficGuardLifecycle.ps1','tests/Test-NativeGuardRecovery.ps1')
+$required+=@('Slint-LICENSE.txt','native/src/desktop.rs','native/src/slint_host.rs','ui/Cargo.toml','ui/Cargo.lock','ui/build.rs','ui/src/lib.rs','ui/src/state.rs','ui/src/preview.rs','ui/src/visuals.rs','native/visual_build.rs','native/src/hero_motion.rs','ui/views/app.slint','ui/README.md')
+$required+=@('tests/Test-SlintStartup.ps1')
+$required+=@('RuleNormalizer.cs','tests/Test-Performance.ps1')
+$required+=@('Build-All.ps1')
+$required+=@('Build-Android.ps1','Build-Linux.sh','Prepare-PortableCore.py','Package-PortableSource.py','go.mod','go.sum','portable_assets.go','docs/platforms.md','tests/linux-network.py','native/src/lib.rs','native/src/portable.rs','native/src/android.rs','core/controller.go','core/controller_test.go','core/import.go','core/node_fields.go','core/openvpn.go','core/rules.go','core/storage.go','core/update.go','cmd/mukhomor-android/bridge.c','cmd/mukhomor-android/main.go','cmd/mukhomor-controller/main.go','android/AndroidManifest.xml','android/res/drawable/ic_mushroom.xml','android/src/org/mukhomor/app/MainActivity.java','android/src/org/mukhomor/app/MukhomorVpnService.java','android/src/org/mukhomor/app/NativeBridge.java','linux/install.sh','linux/mukhomor.desktop','linux/mukhomor.svg','linux/uninstall.sh')
+$required+=@('android/Generate-LaunchArtwork.py','android/res/drawable/ic_mushroom_monochrome.xml','android/res/drawable/ic_stat_mushroom.xml','android/res/drawable/startup_background.xml','android/res/mipmap-anydpi-v26/ic_launcher.xml','android/res/mipmap-anydpi-v33/ic_launcher.xml','android/res/values/colors.xml','android/res/values/styles.xml','android/res/values-v31/styles.xml')
+$required+=@('android/res/drawable/startup_wordmark.xml')
 foreach($relative in $required){
     if($relative -notin $files){$issues.Add($relative+': required source excluded from publication')}
 }
@@ -32,7 +42,7 @@ foreach($relative in $files){
         continue
     }
     if($relative -match '(?i)(^|/)(private|runtime|dist|release-staging|target|graphify-out|bin|Source)/|\.(conf|ovpn|pem|key|pfx|p12|uri|sub|log|db|zip)($|\.)|(^|/)(\.env[^/]*|settings\.json|profiles\.json|api-token\.txt|owner\.sid|installation\.json)$'){$issues.Add($relative+': private/generated path');continue}
-    if($relative -match '(?i)\.(yaml|yml)$' -and $relative -notin @('.github/workflows/ci.yml','.github/workflows/release.yml')){$issues.Add($relative+': unreviewed YAML');continue}
+    if($relative -match '(?i)\.(yaml|yml)$' -and $relative -notin @('.github/workflows/ci.yml','.github/workflows/release.yml','.github/workflows/pages.yml')){$issues.Add($relative+': unreviewed YAML');continue}
     $path=[IO.Path]::GetFullPath((Join-Path $package $relative))
     if(!$path.StartsWith($package+'\',[StringComparison]::OrdinalIgnoreCase) -or !(Test-Path -LiteralPath $path -PathType Leaf)){$issues.Add($relative+': invalid path');continue}
     if($relative -match '(?i)\.(png|ttf)$'){continue}

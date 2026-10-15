@@ -10,6 +10,8 @@ if(!$SkipNative){
     $checks=@('Test-FullRouting.ps1','Test-NativeApp.ps1')+@($checks|Where-Object {$_ -notin @('Test-FullRouting.ps1','Test-NativeApp.ps1')})
 }
 $checks+=@('Test-BundledRouting.ps1')
+$checks+=@('Test-Performance.ps1')
+if(!$SkipNative){$checks+=@('Test-SlintStartup.ps1')}
 foreach($name in $checks){
     Write-Host ('Checking '+$name)
     & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot $name)

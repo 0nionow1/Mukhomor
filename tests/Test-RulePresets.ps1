@@ -21,7 +21,9 @@ foreach ($preset in $repairedDescriptions.presets) {
 $repairedDescriptions.presets[0].description='Custom description: '+[char]0x0416
 $customDescriptions=Get-SplitSettings $package $repairedDescriptions
 Assert ($customDescriptions.presets[0].description -ceq $repairedDescriptions.presets[0].description) 'custom description survives encoding migration'
-Assert (($customDescriptions | ConvertTo-Json -Depth 40 -Compress) -ceq ((Get-SplitSettings $package $customDescriptions) | ConvertTo-Json -Depth 40 -Compress)) 'description migration is idempotent'
+# Hashtable insertion order may change after a defensive copy. Compare the
+# complete canonical structure, including array order and exact text.
+Assert ((Convert-SplitCanonicalValue $customDescriptions | ConvertTo-Json -Depth 40 -Compress) -ceq (Convert-SplitCanonicalValue (Get-SplitSettings $package $customDescriptions) | ConvertTo-Json -Depth 40 -Compress)) 'description migration is idempotent'
 Assert ($s.schema -eq 2 -and $s.presets.Count -eq 5 -and $s.direct.process_names.Count -eq 0) 'editable bundled presets own their rules'
 $effective=Get-EffectiveSplitSettings $s
 Assert ($effective.direct.process_names -contains 'cs2.exe' -and $effective.direct.process_names -contains 'qbittorrent.exe') 'effective defaults preserve routing'
@@ -35,7 +37,7 @@ Assert ($migrated.direct.process_names.Count -eq 1 -and $migrated.direct.process
 Assert ($migrated.direct.domains[0] -eq 'custom.example') 'custom domain survives migration'
 Assert (!(@($migrated.presets|Where-Object {$_.builtin_id -eq 'russia'})[0].enabled)) 'migration does not silently activate absent defaults'
 $again=Get-SplitSettings $package $migrated
-Assert (($again|ConvertTo-Json -Depth 12 -Compress) -eq ($migrated|ConvertTo-Json -Depth 12 -Compress)) 'migration is idempotent'
+Assert ((Convert-SplitCanonicalValue $again|ConvertTo-Json -Depth 40 -Compress) -ceq (Convert-SplitCanonicalValue $migrated|ConvertTo-Json -Depth 40 -Compress)) 'migration is idempotent'
 $migrated.presets=@($migrated.presets|Where-Object {$_.builtin_id -ne 'games'})
 Assert (!(@((Get-SplitSettings $package $migrated).presets|Where-Object {$_.builtin_id -eq 'games'}).Count)) 'ordinary loading does not resurrect deleted builtins'
 $nearLimit=Convert-ToMap $defaults

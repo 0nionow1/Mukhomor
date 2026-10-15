@@ -29,12 +29,6 @@ pub const SECTIONS: [&str; 6] = [
     "ip_cidrs",
     "rule_set_exclusions",
 ];
-pub const DOMAIN_SOURCES: [(i32, &str); 4] = [
-    (3108, "russia"),
-    (3109, "steam"),
-    (3110, "ozon"),
-    (3112, "games"),
-];
 pub fn defaults() -> Value {
     serde_json::from_str(include_str!("../../assets/settings.default.json"))
         .expect("bundled settings")

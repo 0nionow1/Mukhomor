@@ -1,4 +1,4 @@
-name: Windows checks
+name: Windows, Linux and Android checks
 
 on:
   push:
@@ -10,6 +10,89 @@ permissions:
   contents: read
 
 jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+      - name: Install Linux build and test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y build-essential cmake pkg-config libfontconfig1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libssl-dev libxcb-shape0-dev libxcb-xfixes0-dev libcap2-bin zenity xvfb dbus-x11 xauth iproute2
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+      - name: Portable controller and UI tests
+        run: |
+          go test -race -tags=with_gvisor ./core ./cmd/mukhomor-controller
+          cargo test --manifest-path ui/Cargo.toml --locked --lib
+          cargo test --manifest-path native/Cargo.toml --locked --lib -- --test-threads=1
+      - name: Real TUN, TCP, UDP, DNS and route cleanup
+        run: |
+          go build -tags=with_gvisor -o /tmp/mukhomor-controller ./cmd/mukhomor-controller
+          sudo python3 tests/linux-network.py /tmp/mukhomor-controller
+      - name: Linux distribution
+        run: bash Build-Linux.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Mukhomor-linux
+          path: release-staging/
+          if-no-files-found: error
+  android:
+    runs-on: windows-2025
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+      - name: Android toolchains
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          rustup target add aarch64-linux-android x86_64-linux-android
+          $env:JAVA_HOME=$env:JAVA_HOME_17_X64
+          & "$env:ANDROID_HOME\cmdline-tools\latest\bin\sdkmanager.bat" 'platforms;android-35' 'build-tools;35.0.0' 'ndk;27.2.12479018'
+          if($LASTEXITCODE -ne 0){throw 'Android SDK preparation failed'}
+      - name: Build and verify Android APK
+        run: |
+          $env:JAVA_HOME=$env:JAVA_HOME_17_X64
+          $env:ANDROID_NDK_HOME=Join-Path $env:ANDROID_HOME 'ndk\27.2.12479018'
+          .\Build-Android.ps1 -DebugBuild
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Mukhomor-android-test
+          path: release-staging/
+          if-no-files-found: error
+  slint:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+      - name: Slint state regression tests
+        run: cargo +stable test --manifest-path ui/Cargo.toml --lib --locked
+      - name: Slint visual fixtures and viewport bounds
+        run: cargo +stable run --manifest-path ui/Cargo.toml --features preview --locked --bin mukhomor-preview -- --render target/slint-preview
+      - name: UI translations and Windows commands with isolated mock controller
+        run: cargo +stable test --manifest-path native/Cargo.toml --locked slint_ -- --test-threads=1
   checks:
     runs-on: windows-2025
     timeout-minutes: 45
@@ -22,6 +105,16 @@ jobs:
           persist-credentials: false
       - name: Public source boundary
         run: .\tests\Test-PublicSource.ps1
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Website and release history
+        run: node website/scripts/check.mjs
+      - name: Website page transitions
+        run: node --test --test-isolation=none website/scripts/navigation.test.mjs
+      - name: Analytics security and counting
+        run: node --test --test-isolation=none website/analytics/server.test.mjs website/analytics/admin.test.mjs website/analytics/telegram.test.mjs website/analytics/content.test.mjs website/analytics/client.test.mjs
       - name: Bridge profile rollback isolation
         run: .\tests\Test-NativeApp.ps1 -RecoveryOnly
       - name: Install Rust stable
@@ -42,4 +135,4 @@ jobs:
         run: |
           $match=[regex]::Match([IO.File]::ReadAllText((Join-Path $PWD 'native\Cargo.toml')),'(?m)^version = "(\d+\.\d+\.\d+)"$')
           if(!$match.Success){throw 'Missing Cargo version'}
-          .\tests\Test-ReleasePrivacy.ps1 -Archive ('.\dist\Mukhomor-'+$match.Groups[1].Value+'-source.zip')
+          .\tests\Test-ReleasePrivacy.ps1 -Archive ('.\release-staging\'+$match.Groups[1].Value+'\windows\x64\Mukhomor-'+$match.Groups[1].Value+'-source.zip')

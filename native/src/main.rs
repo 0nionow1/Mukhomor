@@ -1,20 +1,31 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-mod appearance;
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+use mukhomor_ui::visuals::appearance;
+#[cfg(windows)]
 mod autostart;
+#[cfg(windows)]
 mod backend;
+#[cfg(windows)]
 mod design;
-mod font;
+#[cfg(windows)]
+mod desktop;
+#[cfg(windows)]
 mod i18n;
-mod mushroom;
+#[cfg(windows)]
 mod platform;
+#[cfg(windows)]
 mod presets;
+#[cfg(windows)]
 mod service;
+#[cfg(windows)]
 mod setup;
-mod texture;
+#[cfg(windows)]
+mod slint_host;
+#[cfg(windows)]
 mod traffic_guard;
+#[cfg(windows)]
 mod traffic_guard_cli;
+#[cfg(windows)]
 mod traffic_guard_tun;
-mod ui;
 use std::path::PathBuf;
 
 pub const APP_NAME: &str = "Mukhomor";
@@ -22,8 +33,8 @@ pub const APP_NAME: &str = "Mukhomor";
 fn argument(args: &[String], key: &str) -> Option<String> {
     args.windows(2).find(|a| a[0] == key).map(|a| a[1].clone())
 }
+#[cfg(windows)]
 fn main() {
-    let started = std::time::Instant::now();
     let args: Vec<String> = std::env::args().collect();
     let base = std::env::current_exe()
         .unwrap()
@@ -66,30 +77,17 @@ fn main() {
         })
     } else if args.iter().any(|a| a == "--qa-startup") {
         if root.join("qa.marker").is_file() {
-            ui::run(base, root, false, started)
+            slint_host::run(root)
         } else {
             Err("Startup probe requires an isolated QA root".into())
         }
     } else {
-        let smoke = args.iter().any(|a| a == "--smoke");
-        if smoke {
-            ui::run(base, root, true, started)
-        } else if args.iter().any(|a| a == "--startup") {
-            setup::ensure_startup_ready(&root).and_then(|ready| {
-                if ready {
-                    ui::run(base, root, false, started)
-                } else {
-                    Ok(())
-                }
-            })
+        if args.iter().any(|a| a == "--startup") {
+            setup::ensure_startup_ready(&root)
+                .and_then(|ready| if ready { slint_host::run(root) } else { Ok(()) })
         } else {
-            setup::ensure_installed(&base, &root).and_then(|ready| {
-                if ready {
-                    ui::run(base, root, false, started)
-                } else {
-                    Ok(())
-                }
-            })
+            setup::ensure_installed(&base, &root)
+                .and_then(|ready| if ready { slint_host::run(root) } else { Ok(()) })
         }
     };
     if let Err(error) = result {
@@ -105,7 +103,6 @@ fn main() {
             a == "--service"
                 || a == "--worker"
                 || a == "--rpc"
-                || a == "--smoke"
                 || a == "--qa-startup"
                 || a == "--traffic-guard-action"
         }) {
@@ -121,6 +118,14 @@ fn main() {
                 .unwrap_or(error);
             platform::error_box(&localized);
         }
+        std::process::exit(1);
+    }
+}
+
+#[cfg(not(windows))]
+fn main() {
+    if let Err(error) = mukhomor_app::run_desktop() {
+        eprintln!("Mukhomor: {error}");
         std::process::exit(1);
     }
 }

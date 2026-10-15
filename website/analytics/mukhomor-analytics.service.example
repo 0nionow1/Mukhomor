@@ -1,0 +1,40 @@
+[Unit]
+Description=Mukhomor optional website analytics
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=mukhomor-analytics
+Group=mukhomor-analytics
+WorkingDirectory=/opt/mukhomor-analytics
+EnvironmentFile=/etc/mukhomor-analytics/environment
+ExecStart=/usr/bin/node /opt/mukhomor-analytics/server.mjs
+Restart=on-failure
+RestartSec=5
+StateDirectory=mukhomor-analytics
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+AmbientCapabilities=
+LockPersonality=true
+MemoryMax=192M
+CPUQuota=25%
+TasksMax=32
+LimitNOFILE=512
+
+[Install]
+WantedBy=multi-user.target

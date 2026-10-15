@@ -1,0 +1,40 @@
+# TEMPLATE ONLY. Activate after explicit owner approval to publish.
+# Copy to .github/workflows/pages.yml and extend the repository's workflow
+# allowlists in .gitignore and tests/Test-PublicSource.ps1 at that point.
+# GitHub Pages settings: Source = GitHub Actions.
+# Reference: https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages
+name: Publish website to GitHub Pages
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check static website
+        run: node website/scripts/check.mjs
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: website/public
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

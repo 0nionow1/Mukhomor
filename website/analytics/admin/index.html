@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <meta name="color-scheme" content="dark">
+  <title>Управление сайтом — Мухомор</title>
+  <link rel="icon" href="/admin/assets/mushroom-mini.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/admin/admin.css">
+  <script src="/admin/admin.js" defer></script>
+  <script src="/admin/manage.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="https://0nionow1.github.io/Mukhomor/" aria-label="На сайт Мухомор"><img src="/admin/assets/mushroom-mini.svg" width="32" height="32" alt="">МУХОМОР<span>/ УПРАВЛЕНИЕ</span></a>
+    <span class="private-label">ЗАКРЫТАЯ ПАНЕЛЬ</span>
+  </header>
+  <main id="main">
+    <section class="login panel" id="login" aria-labelledby="login-title">
+      <div class="panel-label"><span>01 / ДОСТУП</span><span aria-hidden="true">▣</span></div>
+      <div class="login-content">
+        <img class="login-mushroom" src="/admin/assets/mushroom-mini.svg" width="64" height="64" alt="">
+        <h1 id="login-title">Вход в панель</h1>
+        <p class="muted" id="login-subtitle">Сайт, релизы и статистика</p>
+        <form id="login-form">
+          <label for="username">Логин</label>
+          <input id="username" name="username" autocomplete="username" maxlength="64" required spellcheck="false" autocapitalize="none">
+          <label for="password">Пароль</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" maxlength="512" required>
+          <button class="primary" id="submit" type="submit">Получить код <span aria-hidden="true">→</span></button>
+        </form>
+        <div id="code-step" hidden>
+          <div class="code-details"><span id="code-reference"></span><span id="code-expiry" class="muted"></span></div>
+          <form id="code-form">
+            <label for="code">Одноразовый код</label>
+            <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{8}" minlength="8" maxlength="8" required spellcheck="false" aria-describedby="code-help">
+            <p id="code-help" class="muted">8 цифр из сообщения бота. Номер запроса должен совпадать.</p>
+            <button class="primary" id="verify" type="submit">Подтвердить <span aria-hidden="true">→</span></button>
+          </form>
+          <button id="back" class="small back-button" type="button">← Вернуться ко входу</button>
+        </div>
+        <p id="login-status" class="message" role="status" aria-live="polite">Проверка сессии…</p>
+      </div>
+      <div class="panel-foot">Только для владельца</div>
+    </section>
+    <section id="dashboard" aria-labelledby="dashboard-title" hidden>
+      <div class="dashboard-heading">
+        <div><p class="eyebrow">МУХОМОР / ПАНЕЛЬ ВЛАДЕЛЬЦА</p><h1 id="dashboard-title" tabindex="-1">Управление сайтом<span class="accent">.</span></h1><p id="date-range" class="muted"></p></div>
+        <div class="account"><span id="account-name"></span><button class="small" id="logout">Выйти ↗</button></div>
+      </div>
+      <nav class="admin-nav" aria-label="Разделы панели"><button type="button" data-admin-view="releases" aria-pressed="true">Релизы</button><button type="button" data-admin-view="texts" aria-pressed="false">Тексты сайта</button><button type="button" data-admin-view="analytics" aria-pressed="false">Статистика</button></nav>
+      <div id="analytics-panel" hidden>
+      <div class="toolbar">
+        <label for="period">Период</label>
+        <select id="period"><option value="1">Сегодня</option><option value="7" selected>7 дней</option><option value="14">14 дней</option><option value="30">30 дней</option><option value="35">35 дней</option></select>
+        <button class="small" id="refresh">Обновить ↻</button>
+        <span id="updated" class="muted"></span>
+      </div>
+      <p id="dashboard-status" class="message" role="status" aria-live="polite"></p>
+      <div class="metrics" aria-label="Основные показатели">
+        <article class="metric featured"><span class="metric-label">01 / Посетители</span><strong id="metric-uniqueVisitors">—</strong><span class="muted">Уникальные за период</span></article>
+        <article class="metric"><span class="metric-label">02 / Посещения</span><strong id="metric-visits">—</strong><span class="muted">Сессии по 30 минут</span></article>
+        <article class="metric"><span class="metric-label">03 / Просмотры</span><strong id="metric-pageviews">—</strong><span class="muted">Открытия страниц</span></article>
+        <article class="metric"><span class="metric-label">04 / GitHub</span><strong id="metric-github">—</strong><span class="muted">Все переходы</span></article>
+        <article class="metric"><span class="metric-label">05 / Скачать</span><strong id="metric-downloads">—</strong><span class="muted">Клики по кнопке</span></article>
+      </div>
+      <div class="report-grid">
+        <section class="panel timeline" aria-labelledby="timeline-title">
+          <div class="panel-label"><h2 id="timeline-title">Посещения по дням</h2><span class="legend"><i></i> ПОСЕЩЕНИЯ</span></div>
+          <div id="chart" class="chart" role="img" aria-label="График посещений"></div>
+          <div class="chart-dates"><span id="chart-from"></span><span id="chart-to"></span></div>
+          <details class="daily-details"><summary>Данные по дням</summary><div class="table-scroll"><table><caption class="sr-only">Все показатели за каждый день, UTC</caption><thead><tr><th scope="col">Дата</th><th scope="col">Посетители</th><th scope="col">Посещения</th><th scope="col">Просмотры</th><th scope="col">GitHub</th><th scope="col">Скачать</th></tr></thead><tbody id="daily-rows"></tbody></table></div></details>
+        </section>
+        <section class="panel geography" aria-labelledby="countries-title">
+          <div class="panel-label"><h2 id="countries-title">География</h2><span>ПО ПОСЕЩЕНИЯМ</span></div>
+          <div id="countries" class="countries"></div>
+          <div class="panel-foot">Страна IP · <a href="https://db-ip.com/" rel="noreferrer" target="_blank">DB-IP / CC BY 4.0 ↗</a></div>
+        </section>
+      </div>
+      <p class="report-note">Учитываются посетители, согласившиеся на статистику. «Скачать» входит в переходы на GitHub и означает клик, а не завершённую загрузку.</p>
+      </div>
+      <div id="manage-panel">
+        <div class="cms-toolbar"><div><p id="cms-revision"></p><p id="cms-publication" class="muted"></p></div><div class="cms-actions"><button class="small" id="cms-refresh" type="button">Обновить</button><button class="small" id="cms-preview" type="button">Предпросмотр</button><button class="small" id="cms-save" type="button" disabled>Сохранить черновик</button><button class="primary" id="cms-publish" type="button" disabled>Опубликовать</button></div></div>
+        <p id="cms-status" class="message" role="status" aria-live="polite"></p>
+        <section id="release-editor" aria-labelledby="release-editor-title"><h2 id="release-editor-title">Версии приложения</h2><p class="muted">Добавьте опубликованный выпуск GitHub. Новая версия получает статус «В проверке».</p>
+          <form id="cms-import-form" class="cms-import"><label for="cms-version">Номер версии</label><input id="cms-version" required maxlength="60" placeholder="0.8.0 или 0.8.0-beta.1" autocomplete="off" spellcheck="false"><button type="submit" class="small">Добавить с GitHub</button></form>
+          <label class="cms-field" for="recommended-release"><span>Что рекомендовать посетителям</span><select id="recommended-release"></select></label>
+          <div id="release-edit-list"></div>
+        </section>
+        <section id="text-editor" aria-labelledby="text-editor-title" hidden><h2 id="text-editor-title">Тексты сайта</h2><p class="muted">Редактируйте обычный текст. Оформление страницы сохраняется.</p><div class="cms-filters"><label class="cms-field" for="content-page"><span>Страница</span><select id="content-page"></select></label><label class="cms-field" for="content-search"><span>Найти фрагмент</span><input id="content-search" type="search" placeholder="Поиск по тексту"></label></div><div id="content-fields"></div></section>
+        <details class="cms-history"><summary>История и резервная копия</summary><p class="muted">Восстановление создаёт черновик. Опубликованная версия изменится только после отдельной публикации.</p><label for="cms-history">Сохранённая публикация</label><select id="cms-history"></select><div class="cms-actions"><button id="cms-restore" class="small" type="button">Восстановить в черновик</button><button id="cms-export" class="small" type="button">Скачать опубликованный снимок</button></div><ol id="cms-audit"></ol></details>
+      </div>
+    </section>
+    <noscript><p class="message">Для входа и просмотра статистики включите JavaScript.</p></noscript>
+  </main>
+  <dialog id="cms-preview-dialog" class="cms-dialog"><div class="cms-dialog-heading"><h2 id="cms-preview-title">Предпросмотр</h2><button id="cms-close-preview" type="button" class="small" aria-label="Закрыть предпросмотр">Закрыть ×</button></div><p id="cms-preview-note" class="muted"></p><div id="cms-preview-body"></div><button id="cms-confirm-publish" class="primary" type="button" hidden>Опубликовать данные сайта</button></dialog>
+  <footer class="footer"><span>МУХОМОР / ПАНЕЛЬ ВЛАДЕЛЬЦА</span><span>ДАТЫ В UTC</span></footer>
+</body>
+</html>

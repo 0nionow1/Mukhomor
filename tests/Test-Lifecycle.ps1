@@ -51,7 +51,7 @@ try {
         Test-Assert ($script:NativeCalls[0].path -eq (Join-Path $env:SystemRoot 'System32\netsh.exe') -and $script:NativeCalls[0].timeout -le 5000) 'DNS command uses the system executable with a bounded timeout'
         # All remaining process, adapter, DNS and controller calls are mocks.
         $script:Adapter=[pscustomobject]@{InterfaceGuid=[guid]'11111111-1111-1111-1111-111111111111';ifIndex=42;Status='Up';Name='Fixture'}
-        function script:Get-NetAdapter { param($Name,[switch]$IncludeHidden,$ErrorAction) $script:Adapter }
+        function script:Get-NetAdapter { param($Name,[switch]$IncludeHidden,$ErrorAction,$InterfaceIndex) $script:Adapter }
         function script:Invoke-NetshDns { param($Index,$Family,$Source,$Servers,$TimeoutMilliseconds) if ($Family -eq 'ipv6') { throw 'Fixture DNS command timeout' } }
         $rows=@(@{guid=$script:Adapter.InterfaceGuid.ToString('B');name='Fixture';family='ipv4';source='dhcp';servers=@()},@{guid=$script:Adapter.InterfaceGuid.ToString('B');name='Fixture';family='ipv6';source='dhcp';servers=@()})
         $backup=Join-Path $fixture 'runtime\dns-backup.json'
