@@ -43,7 +43,9 @@ test('saving and explicit publishing are atomic; public API exposes only the pub
   assert.equal((await f.published()).status,503);
   assert.equal((await f.admin('/publish',{revision:next.revision})).status,200);
   const publicResponse=await f.published();assert.equal(publicResponse.status,200);const data=await publicResponse.json();
-  assert.equal(data.document.releases.length,1);assert.equal(data.document.texts[seed.fields[0].key],'Публичный текст');
+  assert.deepEqual(data.document.releases.map(item=>item.version),document.releases.filter(item=>item.visible).map(item=>item.version));
+  assert.equal(data.document.releases.some(item=>item.version===document.releases[1].version),false);
+  assert.equal(data.document.texts[seed.fields[0].key],'Публичный текст');
   assert.equal(data.fields,undefined);assert.equal(data.audit,undefined);assert.equal(publicResponse.headers.get('access-control-allow-credentials'),null);
   assert.equal((await f.published({'If-None-Match':publicResponse.headers.get('etag')})).status,304);
   assert.equal((await f.published({Origin:'https://evil.example'})).status,403);
