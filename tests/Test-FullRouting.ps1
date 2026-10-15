@@ -16,7 +16,9 @@ $oldCore=$env:MUKHOMOR_CORE_PATH
 try {
     if(!$SkipCore){$env:MUKHOMOR_CORE_PATH=Get-CorePath $package}
     # Public deterministic fixture credential, used for configuration parsing only.
-    $proxy=@{name='AWG';type='mycelium';server='vpn.fixture.invalid';port=443;seed=('0123456789abcdef'*4);sni='tls.fixture.invalid';udp=$true}
+    # Full routing must also validate in a clean checkout with stock mihomo.
+    # Mycelium compatibility is exercised by its separate optional-core tests.
+    $proxy=@{name='AWG';type='trojan';server='vpn.fixture.invalid';port=443;password='fixture-password';sni='tls.fixture.invalid';udp=$true}
     Write-AtomicJson (Join-Path $fixture 'private\selected-profile.json') @{schema=1;proxy=$proxy}
     $transport=@{server=$proxy.server;port=443;addresses=@('192.0.2.1','2001:db8::1');selected_address='192.0.2.1';interface_name='Fixture Ethernet'}
     $settings=Get-SplitSettings $fixture
