@@ -1,9 +1,11 @@
 """Reject machine paths and credentials in portable runtime packages."""
 import argparse
+import hashlib
 from pathlib import PurePosixPath
 import re
 import tarfile
 import unittest
+from unittest.mock import patch
 import zipfile
 
 BUILD_PATH = re.compile(
@@ -14,11 +16,26 @@ CREDENTIALS = {
     "GitHub credential": re.compile(rb"\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{50,})\b"),
     "private key block": re.compile(rb"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\r\n]+[A-Za-z0-9+/=\r\n]{64,}"),
 }
+# Public build provenance in EasyTier's precompiled Rust FFI, pinned by go.sum:
+# easytier-go v0.0.0-20260910071355-3d0c9c3ca5e2. Match only its exact
+# upstream home prefix and Rust dependency caches in the Go core binaries.
+UPSTREAM_HOME_PREFIX_SHA256 = "9654c9603ab1779404549fb528c883c521494a8a9193c2e193f8d59da9ca50ae"
+UPSTREAM_RUST_CACHES = (b".cargo/registry/src/", b".cargo/git/checkouts/", b".rustup/toolchains/")
+
+
+def is_public_upstream_path(name, data, match):
+    return (
+        PurePosixPath(name).name in ("libmukhomor_core.so", "mukhomor-controller")
+        and match.group().startswith(b"/home/")
+        and hashlib.sha256(match.group()).hexdigest() == UPSTREAM_HOME_PREFIX_SHA256
+        and data[match.end():].startswith(UPSTREAM_RUST_CACHES)
+    )
 
 
 def check_bytes(name, data):
-    if BUILD_PATH.search(data):
-        raise ValueError("Local build path in " + name)
+    for match in BUILD_PATH.finditer(data):
+        if not is_public_upstream_path(name, data, match):
+            raise ValueError("Local build path in " + name)
     for label, pattern in CREDENTIALS.items():
         if pattern.search(data):
             raise ValueError(label + " in " + name)
@@ -63,6 +80,19 @@ def check_archive(archive):
 
 
 class PrivacyTests(unittest.TestCase):
+    def test_public_upstream_exception_is_limited_to_pinned_core_cache_paths(self):
+        prefix = b"/home/upstream-fixture/"
+        with patch(__name__ + ".UPSTREAM_HOME_PREFIX_SHA256", hashlib.sha256(prefix).hexdigest()):
+            for name in ("lib/arm64-v8a/libmukhomor_core.so", "package/mukhomor-controller"):
+                for cache in UPSTREAM_RUST_CACHES:
+                    check_bytes(name, prefix + cache + b"fixture.rs")
+                for value in (prefix + b"private/config", b"/home/other/.cargo/registry/src/file.rs"):
+                    with self.assertRaises(ValueError):
+                        check_bytes(name, value)
+            for name in ("lib/arm64-v8a/libmukhomor_app.so", "package/mukhomor"):
+                with self.assertRaises(ValueError):
+                    check_bytes(name, prefix + UPSTREAM_RUST_CACHES[0] + b"file.rs")
+
     def test_machine_paths_are_rejected_in_binary_bytes(self):
         for path in (b"C:\\Users\\example\\.cargo\\src", b"Z:/VPS/project/main.go",
                      b"/mnt/q/VPS/project/main.rs", b"/home/example/.cargo/src"):
