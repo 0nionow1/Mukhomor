@@ -280,6 +280,36 @@
   },
   "releases": [
     {
+      "version": "0.8.2",
+      "title": "Обновление по кнопке",
+      "changes": [
+        "В настройках появились проверка новой версии и кнопка обновления для Windows, Linux и Android.",
+        "Загрузка показывает прогресс и проверяет SHA-256. Профили, правила и оформление сохраняются.",
+        "Перед установкой нужно отключить VPN и сохранить изменения. Android проверяет подпись APK и запрашивает системное подтверждение.",
+        "Пользователям 0.8.1 нужен один ручной переход на 0.8.2; следующие версии устанавливаются из приложения."
+      ],
+      "status": "testing",
+      "visible": true,
+      "publishedAt": "2026-10-16T00:43:45Z",
+      "files": [
+        {
+          "name": "Mukhomor-0.8.2-android.apk",
+          "url": "https://github.com/0nionow1/Mukhomor/releases/download/v0.8.2/Mukhomor-0.8.2-android.apk",
+          "size": 62546267
+        },
+        {
+          "name": "Mukhomor-0.8.2-linux-x64.tar.gz",
+          "url": "https://github.com/0nionow1/Mukhomor/releases/download/v0.8.2/Mukhomor-0.8.2-linux-x64.tar.gz",
+          "size": 89248450
+        },
+        {
+          "name": "Mukhomor-0.8.2-windows-x64.zip",
+          "url": "https://github.com/0nionow1/Mukhomor/releases/download/v0.8.2/Mukhomor-0.8.2-windows-x64.zip",
+          "size": 77346054
+        }
+      ]
+    },
+    {
       "version": "0.8.1",
       "title": "Slint, Linux и Android",
       "changes": [
