@@ -46,10 +46,53 @@ struct Host {
     preset_serial: u64,
     validation_draft: Value,
     exit_after_save: bool,
+    updater: crate::app_update::Updater,
+    update_root: PathBuf,
     transport: std::sync::Arc<dyn Fn(Value) -> Result<Value, String> + Send + Sync>,
 }
 
 impl Host {
+    fn can_install_update(&self) -> bool {
+        self.state.available() && !self.state.busy() && !self.state.dirty()
+            && self.state.phase() == "idle" && !self.state.can_disconnect()
+            && self.state.snapshot["traffic_guard"]["configured"] != true
+    }
+    fn receive_update(&mut self) {
+        use crate::app_update::{Event, Outcome};
+        let mut finished=false;
+        while let Some(event) = self.updater.poll() {
+            finished |= matches!(&event, Event::Installed(_));
+            let Some(ui) = self.window.upgrade() else { return; };
+            let message = match event {
+                Event::Checked(Ok(Some(release))) => {
+                    ui.set_update_version(release.version.into());
+                    "Доступна новая версия".to_owned()
+                }
+                Event::Checked(Ok(None)) => "Установлена актуальная версия".into(),
+                Event::Checked(Err(error)) | Event::Installed(Err(error)) => error,
+                Event::Progress(done, size) => {
+                    ui.set_update_progress((done * 100 / size) as i32);
+                    "Загружаем обновление…".into()
+                }
+                Event::Installing => { ui.set_update_progress(-1); "Запускаем установку…".into() }
+                #[cfg(not(target_os = "android"))]
+                Event::Installed(Ok(Outcome::Restarted)) => {
+                    let _ = slint::quit_event_loop();
+                    "Обновление установлено".into()
+                }
+                #[cfg(target_os = "android")]
+                Event::Installed(Ok(Outcome::AndroidInstaller)) => "Подтвердите обновление в системном установщике".into(),
+            };
+            ui.set_update_status(self.locale.borrow().text(&message).as_ref().into());
+            if !self.updater.busy { ui.set_update_progress(-1); }
+        }
+        if let Some(ui) = self.window.upgrade() {
+            ui.set_update_busy(self.updater.busy);
+            ui.set_update_available(self.updater.offer.is_some());
+            ui.set_update_install_enabled(!self.updater.busy && self.can_install_update());
+        }
+        if finished { self.refresh(false); }
+    }
     fn refresh_startup(&mut self) {
         self.startup.observe(&self.state, self.created.elapsed() >= Duration::from_secs(30));
         if let Some(ui) = self.window.upgrade() {
@@ -93,6 +136,7 @@ impl Host {
     }
     fn request(&mut self, request: Value) {
         let action = request["action"].as_str().unwrap_or("");
+        if self.updater.installing && action != "Status" { return; }
         if action == "Exit" && self.state.dirty() {
             if let Some(ui) = self.window.upgrade() {
                 ui.set_dialog(9);
@@ -311,10 +355,10 @@ impl Host {
         ui.set_status_text(locale.text(status).as_ref().into());
         ui.set_primary_text(locale.text(button).as_ref().into());
         ui.set_ready(self.state.available());
-        ui.set_busy(self.state.busy());
+        ui.set_busy(self.state.busy() || self.updater.installing);
         ui.set_loaded(self.state.loaded);
         ui.set_primary_enabled(
-            phase != "disconnecting"
+            !self.updater.installing && phase != "disconnecting"
                 && (self.state.can_disconnect()
                     || (self.state.available()
                         && !self.state.busy()
@@ -325,7 +369,7 @@ impl Host {
         );
         ui.set_dirty(self.state.dirty());
         ui.set_routing_editable(
-            self.state.available()
+            !self.updater.installing && self.state.available()
                 && !self.state.busy()
                 && !self.state.can_disconnect()
                 && self.state.snapshot["traffic_guard"]["configured"] != true,
@@ -591,6 +635,29 @@ impl Host {
         let Some(ui) = self.window.upgrade() else {
             return;
         };
+        if self.updater.installing { return; }
+        if action == "app-update-check" {
+            if !self.updater.busy {
+                self.updater.check();
+                ui.set_update_version("".into());
+                ui.set_update_status(self.locale.borrow().text("Проверяем обновления…").as_ref().into());
+                self.receive_update();
+            }
+            return;
+        }
+        if action == "app-update-install" {
+            if self.can_install_update() && !self.updater.busy && self.updater.offer.is_some() {
+                self.startup_pending = false;
+                self.updater.install(self.update_root.clone());
+                ui.set_update_status(self.locale.borrow().text("Загружаем обновление…").as_ref().into());
+                ui.set_update_progress(0);
+                self.receive_update();
+                self.refresh(false);
+            } else {
+                self.notice("Перед установкой отключите VPN и сохраните изменения", true);
+            }
+            return;
+        }
         if action == "boot-retry" {
             if !self.status_pending {
                 self.created = Instant::now();
@@ -1035,6 +1102,8 @@ pub fn run(root: PathBuf) -> Result<(), String> {
         preset_serial: 0,
         validation_draft: Value::Null,
         exit_after_save: false,
+        updater: crate::app_update::Updater::default(),
+        update_root: root.clone(),
         transport,
     }));
     let commands = host.clone();
@@ -1065,6 +1134,7 @@ pub fn run(root: PathBuf) -> Result<(), String> {
                 #[cfg(target_os = "linux")]
                 if instance.activation_requested() { if let Some(ui)=host.window.upgrade() { activate(&ui); } }
                 host.receive();
+                host.receive_update();
                 host.refresh_startup();
                 if let Some(Err(error)) = host.locale.borrow().saved_result() {
                     host.notice(&error, true);
@@ -1356,6 +1426,8 @@ mod tests {
             preset_serial: 0,
             validation_draft: Value::Null,
             exit_after_save: false,
+            updater: crate::app_update::Updater::default(),
+            update_root: PathBuf::new(),
             transport,
         }));
         let mut preview = snapshot.clone();
@@ -1370,6 +1442,21 @@ mod tests {
         assert!(requests.lock().unwrap().iter().all(|r| r["action"] == "Status"));
         requests.lock().unwrap().clear();
         host.borrow_mut().refresh(true);
+        {
+            let mut h=host.borrow_mut();
+            assert!(h.can_install_update());
+            h.state.snapshot["running"]=json!(true);
+            assert!(!h.can_install_update(), "never replace a running VPN");
+            h.state.snapshot["running"]=json!(false);
+            h.state.snapshot["traffic_guard"]["configured"]=json!(true);
+            assert!(!h.can_install_update(), "never replace while route protection remains configured");
+            h.state.snapshot["traffic_guard"]["configured"]=json!(false);
+            h.updater.installing=true;
+            h.request(json!({"action":"Connect"}));
+            h.command("app-update-check","","");
+            assert!(h.state.pending.is_none() && !h.updater.busy, "installation blocks connection and duplicate checks");
+            h.updater.installing=false;
+        }
         {
             let mut h = host.borrow_mut();
             h.sender

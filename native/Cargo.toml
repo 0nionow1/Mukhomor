@@ -1,6 +1,6 @@
 [package]
 name = "mukhomor"
-version = "0.8.1"
+version = "0.8.2"
 edition = "2024"
 license = "MIT"
 description = "Native Slint VPN client for Windows, Linux and Android"
@@ -13,6 +13,16 @@ mukhomor-ui = { path = "../ui", default-features = false }
 raw-window-handle = { version = "=0.6.2" }
 serde = "=1.0.228"
 serde_json = "=1.0.149"
+ureq = { version = "=3.4.2", default-features = false, features = ["rustls"] }
+sha2 = "=0.10.9"
+tempfile = "=3.27.0"
+[target.'cfg(windows)'.dependencies.zip]
+version = "=6.0.0"
+default-features = false
+features = ["deflate"]
+[target.'cfg(target_os = "linux")'.dependencies]
+tar = "=0.4.46"
+flate2 = "=1.1.10"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "=0.61.2", features = [
   "Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Gdi", "Win32_Security",

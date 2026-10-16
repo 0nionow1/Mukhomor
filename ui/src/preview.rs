@@ -16,6 +16,12 @@ fn sample(ui: &AppWindow, count: usize) {
     ui.set_phase("idle".into());
     ui.set_ready(true);
     ui.set_busy(false);
+    ui.set_update_busy(false);
+    ui.set_update_available(false);
+    ui.set_update_install_enabled(false);
+    ui.set_update_status("".into());
+    ui.set_update_version("".into());
+    ui.set_update_progress(-1);
     ui.set_loaded(true);
     ui.set_autostart_available(true);
     ui.set_autoconnect(true);
@@ -126,6 +132,9 @@ fn render(directory: &Path) -> Result<(), Box<dyn std::error::Error>> {
         ("presets-long", 2, 560, 740, 1., 2, 0),
         ("preset-editor", 2, 560, 740, 1., 2, 4),
         ("settings", 2, 560, 740, 1., 3, 0),
+        ("update-available", 2, 560, 740, 1., 3, 0),
+        ("update-mobile", 2, 360, 640, 1., 3, 0),
+        ("update-downloading", 2, 360, 640, 1., 3, 0),
         ("settings-paper", 2, 560, 740, 1., 3, 0),
         ("settings-disabled", 2, 560, 740, 1., 3, 0),
         ("settings-compact", 2, 360, 640, 1., 3, 0),
@@ -135,6 +144,19 @@ fn render(directory: &Path) -> Result<(), Box<dyn std::error::Error>> {
         ("dirty-exit-compact", 2, 360, 640, 1., 1, 9),
     ] {
         sample(&ui, count);
+        if name.starts_with("update-") {
+            ui.set_update_available(true);
+            ui.set_update_install_enabled(true);
+            ui.set_update_version("0.8.3".into());
+            ui.set_update_status("Доступна новая версия".into());
+            ui.set_mobile(name == "update-mobile");
+            if name == "update-downloading" {
+                ui.set_update_busy(true);
+                ui.set_update_install_enabled(false);
+                ui.set_update_status("Загружаем обновление…".into());
+                ui.set_update_progress(42);
+            }
+        }
         if matches!(
             name,
             "connection-reference" | "connection-paper" | "connection-glacier"

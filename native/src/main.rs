@@ -21,6 +21,8 @@ mod setup;
 #[cfg(windows)]
 mod slint_host;
 #[cfg(windows)]
+mod app_update;
+#[cfg(windows)]
 mod traffic_guard;
 #[cfg(windows)]
 mod traffic_guard_cli;

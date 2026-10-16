@@ -31,6 +31,7 @@ jobs:
           go test -race -tags=with_gvisor ./core ./cmd/mukhomor-controller
           cargo test --manifest-path ui/Cargo.toml --locked --lib
           cargo test --manifest-path native/Cargo.toml --locked --lib -- --test-threads=1
+          python3 tests/linux-update.py
       - name: Real TUN, TCP, UDP, DNS and route cleanup
         run: |
           go build -tags=with_gvisor -o /tmp/mukhomor-controller ./cmd/mukhomor-controller

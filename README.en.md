@@ -2,18 +2,22 @@
 
 # Mukhomor
 
-Version **0.8.1** uses a shared Slint interface. Windows, Linux and Android are required project platforms. See [platform builds, installation and validation](docs/platforms.md); choose the matching platform asset and check its release status.
+Version **0.8.2** uses a shared Slint interface. Windows, Linux and Android are required project platforms. See [platform builds, installation and validation](docs/platforms.md); choose the matching platform asset and check its release status.
 
 
 **A VPN for the services you choose. Direct routes for games.** Mukhomor is a native client for Windows, Linux and Android built around [mihomo v1.19.32](https://github.com/MetaCubeX/mihomo/tree/v1.19.32), with local profile import and configurable split routing. It is independent of MetaCubeX, WireGuard and Amnezia.
 
-[Русский](README.md) · [Download 0.8.1](https://github.com/0nionow1/Mukhomor/releases/tag/v0.8.1) · [Documentation](docs/README.md) · [Full changelog](CHANGELOG.md) · [Issues](https://github.com/0nionow1/Mukhomor/issues)
+[Русский](README.md) · [Download 0.8.2](https://github.com/0nionow1/Mukhomor/releases/tag/v0.8.2) · [Documentation](docs/README.md) · [Full changelog](CHANGELOG.md) · [Issues](https://github.com/0nionow1/Mukhomor/issues)
 
 <p align="center"><img src="assets/preview.png" alt="Mukhomor 0.8.1, Neon theme with synthetic demo servers" width="360"></p>
 
 ## Current frontend
 
 Slint is the only UI in this branch. Use `Build-Release.ps1` to build it; previously published archives are not updated automatically. Use `Build-Linux.sh` and `Build-Android.ps1` for the Linux and Android packages. Platform requirements and the validation record are in [platforms.md](docs/platforms.md).
+
+## New in 0.8.2
+
+**Settings → Check for updates → Update app** installs future versions on Windows, Linux and Android. Downloads show progress and are verified against the release asset SHA-256; profiles and settings are retained. Disconnect VPN and save changes before installing. Windows/Linux require administrator approval (`pkexec` on Linux); Android requires installation consent and the same signing key. Users of 0.8.1 need one manual upgrade to 0.8.2 to obtain the update button.
 
 ## New in 0.8.1
 
@@ -48,14 +52,14 @@ Choose the Windows ZIP, Linux tar.gz or Android APK from the release. Linux: ext
 
 Windows:
 
-1. Download `Mukhomor-0.8.1-windows-x64.zip` from [Releases](https://github.com/0nionow1/Mukhomor/releases/tag/v0.8.1) and extract the **entire** archive.
+1. Download `Mukhomor-0.8.2-windows-x64.zip` from [Releases](https://github.com/0nionow1/Mukhomor/releases/tag/v0.8.2) and extract the **entire** archive.
 2. Run `Mukhomor/mukhomor.exe`. Initial setup and updates request administrator permission.
 3. Click **Add configuration** and import your server file or paste its share link/text.
 4. Select a server and connect. Use **Rules** to edit your game's `.exe` bypass if needed; use **Presets** to enable bundled or imported sets.
 
 You need your own server profile. No servers, subscriptions or credentials are included. Remote subscription URLs are not fetched automatically. Executables are currently unsigned; both release archives have SHA256 files.
 
-Closing the window keeps the VPN in the tray. **Exit Mukhomor** disconnects and restores DNS. To update, extract a complete new release and run its EXE; profiles, rules and appearance preferences are retained.
+Closing the window keeps the VPN in the tray. **Exit Mukhomor** disconnects and restores DNS. Update from Settings; when upgrading from 0.8.1, extract the complete 0.8.2 release and run its EXE once. Profiles, rules and appearance preferences are retained.
 
 ## Routing and presets
 
@@ -87,7 +91,7 @@ Build on Windows with Rust MSVC, C++ Build Tools, Windows SDK and PowerShell 5.1
 
 ```powershell
 .\Fetch-Dependencies.ps1
-.\Build-Release.ps1 -Version 0.8.1
+.\Build-Release.ps1 -Version 0.8.2
 .\tests\Run-Checks.ps1
 ```
 

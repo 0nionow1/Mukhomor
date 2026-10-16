@@ -31,6 +31,7 @@ public final class NativeBridge {
     private static String selectionKind;
     private static Uri exportUri;
     static final AtomicLong generation = new AtomicLong();
+    private static final java.util.concurrent.atomic.AtomicBoolean updateInstallerOpen=new java.util.concurrent.atomic.AtomicBoolean();
     static final int VPN_REQUEST = 801, FILE_REQUEST = 802;
     public static String language(String ignored) { return java.util.Locale.getDefault().toLanguageTag(); }
     public static String firstFrame(String ignored) {
@@ -48,6 +49,55 @@ public final class NativeBridge {
     static synchronized void attach(MainActivity value) { context=value.getApplicationContext(); activity=new WeakReference<>(value); }
     static synchronized void detach(MainActivity value) { if (activity.get()==value) activity.clear(); }
     public static String dataPath(String ignored) { return new File(context.getFilesDir(), "private").getAbsolutePath(); }
+    public static String updateCache(String ignored) { return context.getCacheDir().getAbsolutePath(); }
+    public static String prepareUpdate(String ignored) {
+        if(updateInstallerOpen.get())return "ERROR:Подтвердите обновление в системном установщике";
+        if(context.getPackageManager().canRequestPackageInstalls()) return "";
+        MainActivity a=activity.get();
+        if(a==null)return "ERROR:Откройте приложение для установки обновления";
+        CompletableFuture<String> result=new CompletableFuture<>();
+        main.post(()->{try {
+            a.startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,Uri.parse("package:"+context.getPackageName())));
+            result.complete("ERROR:Разрешите обновления из Mukhomor и нажмите кнопку ещё раз");
+        } catch(Exception e) { result.complete("ERROR:Не удалось открыть разрешение установки"); }});
+        try { return result.get(30,TimeUnit.SECONDS); }
+        catch(Exception e) { return "ERROR:Не удалось открыть разрешение установки"; }
+    }
+    public static String installUpdate(String path) {
+        try {
+            MainActivity a=activity.get();
+            if(a==null) return "ERROR:Откройте приложение для установки обновления";
+            File source=new File(path).getCanonicalFile();
+            if(!source.getPath().startsWith(context.getCacheDir().getCanonicalPath()+File.separator))
+                return "ERROR:Некорректный пакет обновления";
+            android.content.pm.PackageManager pm=context.getPackageManager();
+            android.content.pm.PackageInfo next=pm.getPackageArchiveInfo(source.getPath(),android.content.pm.PackageManager.GET_SIGNATURES);
+            android.content.pm.PackageInfo current=pm.getPackageInfo(context.getPackageName(),android.content.pm.PackageManager.GET_SIGNATURES);
+            if(next==null || !context.getPackageName().equals(next.packageName) || next.versionCode<=current.versionCode)
+                return "ERROR:Некорректный пакет обновления";
+            // Keep the existing signing identity. A debug install cannot be
+            // silently replaced by a release APK; never suggest uninstalling.
+            if(next.signatures==null || current.signatures==null || next.signatures.length!=1 || current.signatures.length!=1 || !next.signatures[0].equals(current.signatures[0]))
+                return "ERROR:Подпись APK не совпадает с установленным приложением";
+            CompletableFuture<String> result=new CompletableFuture<>();
+            if(!pm.canRequestPackageInstalls()) {
+                return prepareUpdate("");
+            }
+            File apk=new File(context.getCacheDir(),"verified-update.apk");
+            try(InputStream in=new FileInputStream(source);FileOutputStream out=new FileOutputStream(apk)) {
+                byte[] buffer=new byte[65536];int n;while((n=in.read(buffer))!=-1)out.write(buffer,0,n);out.getFD().sync();
+            }
+            main.post(()->{try {
+                Uri uri=Uri.parse("content://"+context.getPackageName()+".updates/verified-update.apk");
+                Intent intent=new Intent(Intent.ACTION_INSTALL_PACKAGE).setData(uri)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION).putExtra(Intent.EXTRA_RETURN_RESULT,true);
+                a.startActivityForResult(intent,804);
+                updateInstallerOpen.set(true);
+                result.complete("");
+            } catch(Exception e) { result.complete("ERROR:Не удалось запустить установщик обновления"); }});
+            return result.get(30,TimeUnit.SECONDS);
+        } catch(Exception e) { return "ERROR:Не удалось подготовить обновление Android"; }
+    }
     public static String background(String ignored) { MainActivity a=activity.get();if(a!=null)main.post(()->a.moveTaskToBack(true));return ""; }
     static void requestNotificationPermission() {
         main.post(()->{
@@ -127,6 +177,7 @@ public final class NativeBridge {
         }catch(Exception e){return "Cannot export the preset";}
     }
     static synchronized boolean activityResult(int code,int result,Intent data) {
+        if(code==804){updateInstallerOpen.set(false);new File(context.getCacheDir(),"verified-update.apk").delete();return true;}
         if(code==VPN_REQUEST){if(permission!=null)permission.complete(result==Activity.RESULT_OK);return true;}
         if(code!=FILE_REQUEST)return false;
         if(selection==null)return true;

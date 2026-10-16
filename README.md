@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/0nionow1/Mukhomor/releases/tag/v0.8.1"><img src="https://img.shields.io/github/v/release/0nionow1/Mukhomor?style=flat-square&color=FF52B9&label=release" alt="Последний релиз"></a>
+  <a href="https://github.com/0nionow1/Mukhomor/releases/tag/v0.8.2"><img src="https://img.shields.io/github/v/release/0nionow1/Mukhomor?style=flat-square&color=FF52B9&label=release" alt="Последний релиз"></a>
   <img src="https://img.shields.io/badge/Windows-10%20%2F%2011%20x64-16F5D1?style=flat-square" alt="Windows 10/11 x64">
   <img src="https://img.shields.io/badge/Linux-x64-16F5D1?style=flat-square" alt="Linux x64">
   <img src="https://img.shields.io/badge/Android-8.0%2B-16F5D1?style=flat-square" alt="Android 8.0+">
@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/0nionow1/Mukhomor/releases/tag/v0.8.1"><b>Скачать для Windows, Linux и Android</b></a> ·
+  <a href="https://github.com/0nionow1/Mukhomor/releases/tag/v0.8.2"><b>Скачать для Windows, Linux и Android</b></a> ·
   <a href="docs/README.md">Документация</a> ·
   <a href="docs/vps-and-vpn.md">Свой VPS и VPN</a> ·
   <a href="CHANGELOG.md">Что нового</a> ·
@@ -31,7 +31,15 @@ Mukhomor — открытый клиент для Windows, Linux и Android дл
 
 <p align="center"><img src="assets/preview.png" alt="Mukhomor 0.8.1: тема Неон, подключение и тестовые серверы" width="360"></p>
 
-## Что нового в 0.8.1
+## Что нового в 0.8.2
+
+- **Обновление по кнопке.** В настройках появились проверка новой версии, загрузка с прогрессом и установка для Windows, Linux и Android.
+- **Проверка пакета.** Клиент сверяет SHA-256, платформу и номер версии. Android проверяет подпись APK и открывает системный установщик.
+- **Сохранение данных.** Профили, правила и оформление остаются на месте. Перед установкой нужно отключить VPN и сохранить изменения.
+
+Пользователям Slint-версии **0.8.1** потребуется один раз установить полный пакет 0.8.2 вручную. После этого следующие выпуски устанавливаются через **Настройки → Проверить обновления → Обновить приложение**.
+
+## Сохранено из 0.8.1
 
 Версия **0.8.1**, общий интерфейс — **Slint**. Windows, Linux и Android входят в обязательные платформы проекта. Для новых платформ добавлены TUN/VpnService, локальный импорт, правила и отдельные сборщики. [Сборка, установка и проверка платформ](docs/platforms.md). Выбирайте файл своей платформы и учитывайте статус сборки в релизе.
 
@@ -72,6 +80,8 @@ Mukhomor использует Rust и Slint с программной отрис
 
 ## Запуск за несколько минут
 
+В **0.8.2** доступно **Настройки → Проверить обновления → Обновить приложение** для Windows, Linux и Android. Пакет проверяется по SHA-256, профили и настройки сохраняются. Перед установкой отключите VPN и сохраните изменения; система запросит необходимые разрешения (`pkexec` на Linux).
+
 | Платформа | Файл и установка |
 | --- | --- |
 | Windows 10/11 x64 | ZIP: распакуйте целиком и запустите `Mukhomor/mukhomor.exe` |
@@ -80,14 +90,14 @@ Mukhomor использует Rust и Slint с программной отрис
 
 [Требования и ограничения платформ](docs/platforms.md). Шаги для Windows:
 
-1. Скачайте **`Mukhomor-X.Y.Z-windows-x64.zip`** из [последнего релиза](https://github.com/0nionow1/Mukhomor/releases/tag/v0.8.1).
+1. Скачайте **`Mukhomor-X.Y.Z-windows-x64.zip`** из [последнего релиза](https://github.com/0nionow1/Mukhomor/releases/tag/v0.8.2).
 2. Распакуйте **весь архив** и запустите **`Mukhomor/mukhomor.exe`**. Подтвердите запрос Windows при первой установке.
 3. Нажмите **Добавить конфигурацию** и выберите свой файл или вставьте серверную ссылку/текст.
 4. Выберите сервер и нажмите **Подключиться**. При необходимости добавьте `.exe` игры на странице **Правила** и сохраните.
 
 Нужны Windows 10/11 **x64** и собственный серверный профиль. Серверы, ключи и подписки не входят в комплект. EXE пока без подписи издателя; в Releases есть SHA256 для проверки архивов. Полное руководство: [установка, трей, обновление и удаление](docs/getting-started.md).
 
-Крестик скрывает окно в трей и сохраняет VPN. **Выход из Mukhomor** в трее отключает VPN и восстанавливает DNS. Для обновления распакуйте новую версию целиком и запустите её EXE; профили сохраняются.
+Крестик скрывает окно в трей и сохраняет VPN. **Выход из Mukhomor** в трее отключает VPN и восстанавливает DNS. Обновления доступны в настройках; для первоначального перехода с 0.8.1 распакуйте полный пакет 0.8.2 и запустите его EXE.
 
 ## Как разделяется трафик
 

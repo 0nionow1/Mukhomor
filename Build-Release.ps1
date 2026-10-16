@@ -45,6 +45,9 @@ function Copy-Reviewed([string]$Relative,[string]$Destination){
 $common=@('AppStartup.ps1','NativeBridge.ps1','SplitVpn.psm1','RulePresets.ps1','RuleNormalizer.cs','SplitWindows.psm1','TrafficGuard.psm1','ProfileImport.psm1','Install.ps1','Uninstall.ps1','README.md','Mihomo-LICENSE.txt','Wintun-LICENSE.txt','Rules-LICENSE.txt','ThirdParty-LICENSE.txt','Tiny5-LICENSE.txt','LICENSE','assets\settings.default.json','assets\README.ru.md','assets\preview.png','lists\sources.json','lists\seed-games.list','lists\seed-russia.list','lists\seed-steam.list','lists\seed-ozon.list')
 foreach($file in $common){Copy-Reviewed $file $runtime;Copy-Reviewed $file $source}
 Copy-Reviewed 'Slint-LICENSE.txt' $source
+Copy-Reviewed 'native\src\app_update.rs' $source
+Copy-Reviewed 'tests\linux-update.py' $source
+Copy-Reviewed 'android\src\org\mukhomor\app\UpdateProvider.java' $source
 Copy-Reviewed 'Slint-LICENSE.txt' $runtime
 Copy-Reviewed 'ui\README.md' $runtime
 $publication=@('ROADMAP.md','docs\performance.md','README.en.md','CHANGELOG.md','CONTRIBUTING.md','SECURITY.md','assets\github-banner.svg','assets\github-social-preview.png','assets\appearance-preview.png','docs\README.md','docs\getting-started.md','docs\gaming-and-routing.md','docs\protocols.md','docs\vps-and-vpn.md','docs\troubleshooting.md','docs\development.md','docs\architecture.md','docs\releasing.md','docs\credits.md')

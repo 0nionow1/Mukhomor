@@ -1,12 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.mukhomor.app" android:versionCode="801" android:versionName="0.8.1">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.mukhomor.app" android:versionCode="802" android:versionName="0.8.2">
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application android:label="Mukhomor" android:icon="@mipmap/ic_launcher" android:theme="@style/MukhomorTheme" android:allowBackup="false" android:usesCleartextTraffic="false" android:extractNativeLibs="true" android:supportsRtl="true">
+        <provider android:name=".UpdateProvider" android:authorities="org.mukhomor.app.updates" android:exported="false" android:grantUriPermissions="true" />
         <activity android:name=".MainActivity" android:exported="true" android:configChanges="orientation|keyboardHidden|screenSize|screenLayout|uiMode|density" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize">
             <meta-data android:name="android.app.lib_name" android:value="mukhomor_app" />
             <intent-filter>

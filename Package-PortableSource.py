@@ -25,6 +25,7 @@ native/src/lib.rs native/src/main.rs native/src/mushroom.rs native/src/platform.
 native/src/portable.rs native/src/presets.rs native/src/profile_store.rs
 native/src/service.rs native/src/setup.rs native/src/setup_recovery.rs
 native/src/slint_host.rs native/src/traffic_guard.rs
+native/src/app_update.rs
 native/src/traffic_guard_cli.rs native/src/traffic_guard_tun.rs
 ui/Cargo.toml ui/Cargo.lock ui/build.rs ui/README.md ui/views/app.slint
 ui/src/lib.rs ui/src/state.rs ui/src/preview.rs ui/src/visuals.rs
@@ -42,8 +43,10 @@ android/res/values/colors.xml android/res/values/styles.xml android/res/values-v
 android/src/org/mukhomor/app/MainActivity.java
 android/src/org/mukhomor/app/MukhomorVpnService.java
 android/src/org/mukhomor/app/NativeBridge.java
+android/src/org/mukhomor/app/UpdateProvider.java
 linux/install.sh linux/uninstall.sh linux/mukhomor.desktop linux/mukhomor.svg
 tests/linux-network.py tests/android-fixture.py tests/android-probe.c
+tests/linux-update.py
 tests/Test-PortableReleasePrivacy.py
 Source/mihomo-v1.19.32-source.zip
 """.split()

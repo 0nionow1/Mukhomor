@@ -1,9 +1,15 @@
-# Mukhomor 0.8.1: Windows, Linux и Android
+# Mukhomor 0.8.2: Windows, Linux и Android
 
 Windows, Linux и Android — обязательные платформы проекта. Версия исходников
-0.8.1. Опубликованные файлы и статус проверки указаны в [GitHub Releases](https://github.com/0nionow1/Mukhomor/releases/tag/v0.8.1).
+0.8.2. Опубликованные файлы и статус проверки указаны в [GitHub Releases](https://github.com/0nionow1/Mukhomor/releases/tag/v0.8.2).
 Новые платформы используют тот же Slint-интерфейс, темы, редактор правил и
 наборов. Windows сохраняет свой установленный контроллер и существующие профили.
+
+Начиная с 0.8.2, обновление приложения доступно из настроек на всех трёх платформах.
+Перед установкой отключите VPN и сохраните изменения. Windows использует штатный
+установщик, Linux запрашивает права через `pkexec` (polkit), Android открывает системный
+установщик APK с проверкой того же ключа подписи. Данные пользователей сохраняются.
+В 0.8.1 кнопки ещё нет: потребуется один ручной переход на полный пакет 0.8.2.
 
 ## Сборка всех платформ и расположение файлов
 
@@ -22,7 +28,7 @@ Windows, Linux и Android — обязательные платформы про
 
 ```text
 release-staging/
-  0.8.1/
+  0.8.2/
     windows/x64/                  ZIP, исходники, SHA-256, package/Mukhomor
     linux/x64/                    tar.gz и SHA-256 (исходники внутри)
     android/universal/debug/      тестовый APK, исходники, SHA-256
@@ -58,12 +64,12 @@ Android инициализирует JNI-контроллер, Windows полу�
 
 Для сборки нужны Python 3, Rust stable, Go 1.27.2, C/C++-компилятор, CMake, pkg-config,
 заголовки fontconfig, xkbcommon, Wayland, OpenSSL и XCB. Для выбора файлов нужен
-`zenity`; для установки — `setcap` из `libcap2-bin`/`libcap`.
+`zenity`; для установки — `setcap` из `libcap2-bin`/`libcap`, для обновления из приложения — `pkexec` из polkit.
 
 ```sh
 bash Build-Linux.sh
-tar -xzf release-staging/0.8.1/linux/x64/Mukhomor-0.8.1-linux-x64.tar.gz
-cd Mukhomor-0.8.1
+tar -xzf release-staging/0.8.2/linux/x64/Mukhomor-0.8.2-linux-x64.tar.gz
+cd Mukhomor-0.8.2
 sudo bash install.sh
 mukhomor
 ```
@@ -96,7 +102,7 @@ NDK 27.2.12479018, JDK 17, Python 3, Go 1.27.2 и Rust с Android-targets:
 ```powershell
 rustup target add aarch64-linux-android x86_64-linux-android
 ./Build-Android.ps1 -DebugBuild
-adb install -r release-staging/0.8.1/android/universal/debug/Mukhomor-0.8.1-android-debug.apk
+adb install -r release-staging/0.8.2/android/universal/debug/Mukhomor-0.8.2-android-debug.apk
 ```
 
 Сборщик использует `ANDROID_HOME`, `ANDROID_NDK_HOME`, `JAVA_HOME` и `go` из PATH;

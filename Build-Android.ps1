@@ -61,6 +61,7 @@ try {
         $linker=Join-Path $llvm ($clangTarget+'-clang.cmd')
         [Environment]::SetEnvironmentVariable(('CARGO_TARGET_'+$target.Replace('-','_').ToUpperInvariant()+'_LINKER'),$linker,'Process')
         [Environment]::SetEnvironmentVariable(('CC_'+$target.Replace('-','_')),$linker,'Process')
+        [Environment]::SetEnvironmentVariable(('AR_'+$target.Replace('-','_')),(Join-Path $llvm 'llvm-ar.exe'),'Process')
         $env:RUSTFLAGS='-C link-arg=-Wl,-z,max-page-size=16384'
         $cargoArgs=@('build','--manifest-path','native/Cargo.toml','--locked','--lib','--target',$target)
         if(!$DebugBuild){$cargoArgs+='--release'}

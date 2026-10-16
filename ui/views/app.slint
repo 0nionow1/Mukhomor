@@ -450,6 +450,12 @@ export component AppWindow inherits Window {
     in property <bool> primary-enabled;
     in property <bool> ready;
     in property <bool> busy;
+    in property <bool> update-busy;
+    in property <bool> update-available;
+    in property <bool> update-install-enabled;
+    in property <string> update-status;
+    in property <string> update-version;
+    in property <int> update-progress: -1;
     in property <string> notice;
     in property <bool> notice-error;
     in property <image> hero-image;
@@ -562,7 +568,7 @@ export component AppWindow inherits Window {
         enabled: root.dialog == 0 && !root.mobile;
         Image { source: root.app-icon; x: root.margin - 6px; y: 20px * Palette.scale; width: 48px * Palette.scale; height: self.width; image-rendering: pixelated; }
         Label { x: root.margin + 48px * Palette.scale; y: 25px * Palette.scale; height: 32px * Palette.scale; text: "Mukhomor"; }
-        Hint { x: root.margin + 170px * Palette.scale; y: 31px * Palette.scale; height: 24px * Palette.scale; text: "v0.8.1"; }
+        Hint { x: root.margin + 170px * Palette.scale; y: 31px * Palette.scale; height: 24px * Palette.scale; text: "v0.8.2"; }
         if !root.mobile: Action { x: root.content-width - 90px * Palette.scale; y: 24px * Palette.scale; width: 28px * Palette.scale; height: 28px * Palette.scale; glyph: root.minimize-icon; flat: true; clicked => { root.minimize-window(); } }
         if !root.mobile: Action { x: root.content-width - 54px * Palette.scale; y: 24px * Palette.scale; width: 28px * Palette.scale; height: 28px * Palette.scale; glyph: root.close-icon; flat: true; clicked => { root.close-window(); } }
     }
@@ -764,6 +770,19 @@ export component AppWindow inherits Window {
             Hint { text: root.appearance-open ? I18n.tr("Твой стиль. Твой размер. Без перезапуска.") : I18n.tr("Твой VPN. Твои привычки."); height: 42px * Palette.scale; wrap: word-wrap; }
             if !root.appearance-open: VerticalLayout {
                 spacing: 0px;
+                Hint { text: I18n.tr("ОБНОВЛЕНИЕ ПРИЛОЖЕНИЯ"); height: 32px * Palette.scale; }
+                Hint {
+                    text: root.update-status != "" ? root.update-status + (root.update-available && !root.update-busy ? " · v" + root.update-version : "") : I18n.tr("Новые версии устанавливаются здесь. Настройки сохраняются.");
+                    wrap: word-wrap; min-height: 48px * Palette.scale;
+                }
+                if root.update-progress >= 0: Hint { text: root.update-progress + "%"; height: 28px * Palette.scale; }
+                Action { text: I18n.tr("Проверить обновления"); enabled: !root.update-busy; clicked => { root.command("app-update-check", "", ""); } }
+                if root.update-available: VerticalLayout {
+                    spacing: 8px; padding-top: 8px;
+                    Action { text: I18n.tr("Обновить приложение"); primary: true; enabled: root.update-install-enabled; clicked => { root.command("app-update-install", "", ""); } }
+                    Hint { text: I18n.tr("Перед установкой отключите VPN и сохраните изменения"); wrap: word-wrap; min-height: 44px * Palette.scale; }
+                }
+                Rectangle { height: 24px * Palette.scale; }
                 Surface {
                     height: 220px * Palette.scale; outline: 1px;
                     VerticalLayout {

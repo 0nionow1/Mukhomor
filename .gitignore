@@ -62,6 +62,7 @@
 !/native/src/appearance.rs
 !/native/src/mushroom.rs
 !/native/src/slint_host.rs
+!/native/src/app_update.rs
 !/native/src/lib.rs
 !/native/src/portable.rs
 !/native/src/android.rs
@@ -128,6 +129,7 @@
 !/tests/Test-UdpRouting.ps1
 !/tests/Test-NativeApp.ps1
 !/tests/Test-SlintStartup.ps1
+!/tests/linux-update.py
 !/tests/Test-ReleasePrivacy.ps1
 !/tests/Test-ReleasePe.ps1
 !/tests/Test-PixelFont.ps1

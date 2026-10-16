@@ -52,7 +52,7 @@ Preview использует синтетические данные и пров
 .\tests\Test-MyceliumLifecycle.ps1
 .\tests\Test-ProtocolTransport.ps1
 .\tests\Test-ReleasePrivacy.ps1
-.\tests\Test-ReleasePrivacy.ps1 -Archive .\release-staging\0.8.1\windows\x64\Mukhomor-0.8.1-source.zip
+.\tests\Test-ReleasePrivacy.ps1 -Archive .\release-staging\0.8.2\windows\x64\Mukhomor-0.8.2-source.zip
 ```
 
 Запускайте тесты отдельными PowerShell-процессами, чтобы состояние импортированных модулей не влияло на соседние проверки. Полный последовательный набор выбранных тестов: `tests/Run-Checks.ps1`; Node.js должен быть в PATH.

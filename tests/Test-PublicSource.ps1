@@ -23,6 +23,7 @@ $checked=0
 $required=@('TrafficGuard.psm1','native/src/cleanup_request.rs','native/src/setup_recovery.rs','native/src/traffic_guard.rs','native/src/traffic_guard_cli.rs','native/src/traffic_guard_tun.rs','tests/Set-OwnedTestRoot.ps1','tests/Test-PrivateAcl.ps1','tests/Test-Uninstall.ps1','tests/Test-ControllerRecovery.ps1','tests/Test-FullRouting.ps1','tests/Test-FullTrafficGuardLifecycle.ps1','tests/Test-NativeGuardRecovery.ps1')
 $required+=@('Slint-LICENSE.txt','native/src/desktop.rs','native/src/slint_host.rs','ui/Cargo.toml','ui/Cargo.lock','ui/build.rs','ui/src/lib.rs','ui/src/state.rs','ui/src/preview.rs','ui/src/visuals.rs','native/visual_build.rs','native/src/hero_motion.rs','ui/views/app.slint','ui/README.md')
 $required+=@('tests/Test-SlintStartup.ps1')
+$required+=@('native/src/app_update.rs','android/src/org/mukhomor/app/UpdateProvider.java')
 $required+=@('RuleNormalizer.cs','tests/Test-Performance.ps1')
 $required+=@('Build-All.ps1')
 $required+=@('tests/Test-PortableReleasePrivacy.py')
