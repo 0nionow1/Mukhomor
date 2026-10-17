@@ -1,0 +1,38 @@
+name: Build I2P native helpers
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [windows, android-arm64-v8a, android-x86_64]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Native build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y build-essential cmake perl pkg-config g++-mingw-w64-x86-64-posix
+          sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
+          sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
+      - name: Linux Android NDK
+        if: startsWith(matrix.platform, 'android-')
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018"'
+      - name: Build pinned helper and source manifest
+        env:
+          I2P_PLATFORM: ${{ matrix.platform }}
+        run: python3 i2p/build.py --platform "$I2P_PLATFORM" --ndk "$ANDROID_HOME/ndk/27.2.12479018" --jobs 4 --export-dir target/i2p-ci
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: i2p-native-${{ matrix.platform }}
+          path: target/i2p-ci/
+          if-no-files-found: error

@@ -1,6 +1,7 @@
 """Build the owned i2pd child from pinned sources (Linux / MinGW / Android NDK)."""
 import argparse
 import hashlib
+import json
 import os
 import platform as host_platform
 from pathlib import Path
@@ -10,6 +11,24 @@ import tarfile
 import urllib.request
 import zipfile
 from prepare import ROOT, prepare, atomic_write
+
+ARTIFACT_INPUTS = ('i2p/main.cpp', 'i2p/CMakeLists.txt', 'i2p/build.py',
+                   'i2p/prepare.py', 'i2p/dependencies.sha256')
+
+
+def export_artifact(binary, platform, directory):
+    """Keep same-run CI artifacts tied to their exact reviewed build inputs."""
+    destination = directory / platform
+    destination.mkdir(parents=True, exist_ok=True)
+    data = binary.read_bytes()
+    atomic_write(destination / binary.name, data)
+    manifest = {
+        'schema': 1, 'platform': platform, 'name': binary.name,
+        'size': len(data), 'sha256': hashlib.sha256(data).hexdigest(),
+        'inputs': {name: hashlib.sha256((ROOT / name).read_text(encoding='utf-8-sig').replace('\r\n', '\n').encode()).hexdigest()
+                   for name in ARTIFACT_INPUTS},
+    }
+    atomic_write(destination / 'manifest.json', (json.dumps(manifest, indent=2) + '\n').encode())
 
 SOURCES = {
     'boost_1_90_0.tar.bz2': ('49551aff3b22cbc5c5a9ed3dbc92f0e23ea50a0f7325b0d198b705e8ee3fc305', 'https://archives.boost.io/release/1.90.0/source/boost_1_90_0.tar.bz2'),
@@ -159,5 +178,9 @@ if __name__ == '__main__':
     p.add_argument('--platform',required=True,choices=['windows','linux','android-arm64-v8a','android-x86_64'])
     p.add_argument('--ndk',type=Path)
     p.add_argument('--jobs',type=int,default=4)
+    p.add_argument('--export-dir',type=Path)
     a=p.parse_args()
-    print(build(a.platform,a.ndk,a.jobs))
+    binary = build(a.platform,a.ndk,a.jobs)
+    if a.export_dir:
+        export_artifact(binary, a.platform, a.export_dir)
+    print(binary)

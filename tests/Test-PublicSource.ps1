@@ -60,7 +60,7 @@ foreach($relative in $files){
         continue
     }
     if($relative -match '(?i)(^|/)(private|runtime|dist|release-staging|target|graphify-out|bin|Source)/|\.(conf|ovpn|pem|key|pfx|p12|uri|sub|log|db|zip)($|\.)|(^|/)(\.env[^/]*|settings\.json|profiles\.json|api-token\.txt|owner\.sid|installation\.json)$'){$issues.Add($relative+': private/generated path');continue}
-    if($relative -match '(?i)\.(yaml|yml)$' -and $relative -notin @('.github/workflows/ci.yml','.github/workflows/release.yml','.github/workflows/pages.yml')){$issues.Add($relative+': unreviewed YAML');continue}
+    if($relative -match '(?i)\.(yaml|yml)$' -and $relative -notin @('.github/workflows/ci.yml','.github/workflows/release.yml','.github/workflows/pages.yml','.github/workflows/i2p.yml')){$issues.Add($relative+': unreviewed YAML');continue}
     $path=[IO.Path]::GetFullPath((Join-Path $package $relative))
     if(!$path.StartsWith($package+'\',[StringComparison]::OrdinalIgnoreCase) -or !(Test-Path -LiteralPath $path -PathType Leaf)){$issues.Add($relative+': invalid path');continue}
     if($relative -match '(?i)\.(png|ttf)$'){continue}

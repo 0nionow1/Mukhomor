@@ -31,6 +31,10 @@ jobs:
           appendFileSync(process.env.GITHUB_OUTPUT,`build=${!complete}\n`);
           if(complete)console.log('Complete published release preserved; no signing credentials or replacement build requested.');
           NODE
+  i2p:
+    needs: prepare
+    if: needs.prepare.outputs.build == 'true'
+    uses: ./.github/workflows/i2p.yml
   linux:
     needs: prepare
     if: needs.prepare.outputs.build == 'true'
@@ -67,13 +71,15 @@ jobs:
           path: release-staging/
           if-no-files-found: error
   android:
-    needs: prepare
+    needs: [prepare, i2p]
     if: needs.prepare.outputs.build == 'true'
     runs-on: windows-2025
     timeout-minutes: 90
     defaults:
       run:
         shell: powershell
+    env:
+      MUKHOMOR_I2P_PREBUILT_ROOT: ${{ github.workspace }}/target/i2p-prebuilt
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -81,6 +87,11 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          pattern: i2p-native-*
+          path: target/i2p-prebuilt/
+          merge-multiple: true
       - name: Android toolchains
         run: |
           rustup toolchain install stable --profile minimal --no-self-update
@@ -109,7 +120,7 @@ jobs:
           path: release-staging/
           if-no-files-found: error
   release:
-    needs: [prepare, linux, android]
+    needs: [prepare, i2p, linux, android]
     if: needs.prepare.outputs.build == 'true'
     runs-on: windows-2025
     timeout-minutes: 45
@@ -118,6 +129,8 @@ jobs:
     defaults:
       run:
         shell: powershell
+    env:
+      MUKHOMOR_I2P_PREBUILT_ROOT: ${{ github.workspace }}/target/i2p-prebuilt
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -147,6 +160,11 @@ jobs:
           rustup default stable
       - name: Fetch verified dependencies
         run: .\Fetch-Dependencies.ps1
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          pattern: i2p-native-*
+          path: target/i2p-prebuilt/
+          merge-multiple: true
       - name: Rust tests
         run: cargo +stable test --manifest-path .\native\Cargo.toml --locked -- --test-threads=1
       - name: Build release packages

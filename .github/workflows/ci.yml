@@ -3,6 +3,7 @@ name: Windows, Linux and Android checks
 on:
   push:
     branches: [main]
+    paths-ignore: ['website/**']
   pull_request:
   workflow_dispatch:
 
@@ -10,6 +11,8 @@ permissions:
   contents: read
 
 jobs:
+  i2p:
+    uses: ./.github/workflows/i2p.yml
   linux:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -44,11 +47,14 @@ jobs:
           path: release-staging/
           if-no-files-found: error
   android:
+    needs: i2p
     runs-on: windows-2025
     timeout-minutes: 90
     defaults:
       run:
         shell: powershell
+    env:
+      MUKHOMOR_I2P_PREBUILT_ROOT: ${{ github.workspace }}/target/i2p-prebuilt
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -56,6 +62,11 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          pattern: i2p-native-*
+          path: target/i2p-prebuilt/
+          merge-multiple: true
       - name: Android toolchains
         run: |
           rustup toolchain install stable --profile minimal --no-self-update
@@ -95,11 +106,14 @@ jobs:
       - name: UI translations and Windows commands with isolated mock controller
         run: cargo +stable test --manifest-path native/Cargo.toml --locked slint_ -- --test-threads=1
   checks:
+    needs: i2p
     runs-on: windows-2025
     timeout-minutes: 45
     defaults:
       run:
         shell: powershell
+    env:
+      MUKHOMOR_I2P_PREBUILT_ROOT: ${{ github.workspace }}/target/i2p-prebuilt
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -126,6 +140,11 @@ jobs:
           rustup default stable
       - name: Fetch verified dependencies
         run: .\Fetch-Dependencies.ps1
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          pattern: i2p-native-*
+          path: target/i2p-prebuilt/
+          merge-multiple: true
       - name: Rust tests
         run: cargo +stable test --manifest-path .\native\Cargo.toml --locked -- --test-threads=1
       - name: Build release packages

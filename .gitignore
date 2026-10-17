@@ -237,6 +237,7 @@ installation.json
 !/.github/workflows/ci.yml
 !/.github/workflows/release.yml
 !/.github/workflows/pages.yml
+!/.github/workflows/i2p.yml
 
 # Reviewed static website; its deployment template is inactive until approval.
 !/website/
@@ -270,6 +271,7 @@ installation.json
 !/website/public/experience.css
 !/website/public/experience.js
 !/website/public/scene.css
+!/website/public/roots.css
 !/website/public/scene.js
 !/website/public/navigation.js
 !/website/public/.nojekyll

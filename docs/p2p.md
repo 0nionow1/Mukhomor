@@ -79,6 +79,13 @@ On WSL, compilation uses an ext4 cache by default; `MUKHOMOR_I2P_BUILD_CACHE`
 can override it. Final helper binaries are copied back into the project target.
 Linux uses GCC/CMake. Network access is needed only for missing pinned sources.
 
+GitHub Actions builds the Windows and both Android I2P children on Linux, then
+passes them to the Windows packaging jobs through artifacts from the same run.
+`MUKHOMOR_I2P_PREBUILT_ROOT` selects this CI input; the wrapper verifies platform,
+binary size and SHA-256, plus the exact reviewed build-input hashes before copying.
+An absent or mismatched manifest fails the build. Ordinary local builds keep the
+Linux/WSL compilation path.
+
 Acceptance on 2026-10-17:
 
 - Windows: the production helpers reached an actual `.b32.i2p` HTTP resource
