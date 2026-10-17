@@ -82,14 +82,22 @@ function Save-ProfileIndex($Index) {
     $info.FileName=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $info.Arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$scriptPath+'" -Root "'+$mockRoot+'"'
     $info.UseShellExecute=$false;$info.CreateNoWindow=$true
-    $info.RedirectStandardOutput=$true;$info.RedirectStandardError=$true
+    $info.RedirectStandardInput=$true;$info.RedirectStandardOutput=$true;$info.RedirectStandardError=$true
     $child=New-Object Diagnostics.Process;$child.StartInfo=$info
     try {
         [void]$child.Start()
+        # The fixture reads its request from a file. Give it an owned, closed
+        # input pipe so it cannot inherit the hosted Actions shell's stdin.
+        $child.StandardInput.Close()
         $stdout=$child.StandardOutput.ReadToEndAsync();$stderr=$child.StandardError.ReadToEndAsync()
         # This is a functional recovery check, not a startup latency assertion.
         # Allow cold PowerShell/module loading on hosted Windows runners.
-        if(!$child.WaitForExit(30000)){throw 'Pure Select recovery fixture timed out'}
+        if(!$child.WaitForExit(30000)){
+            $child.Kill();$child.WaitForExit(1000)|Out-Null
+            if($stdout.Wait(1000)){Write-Host $stdout.Result}
+            if($stderr.Wait(1000)){Write-Host $stderr.Result}
+            throw 'Pure Select recovery fixture timed out'
+        }
         if(!$stdout.Wait(1000) -or !$stderr.Wait(1000)){throw 'Pure Select recovery fixture output timed out'}
         $reply=$stdout.Result|ConvertFrom-Json
         if($child.ExitCode -ne 1 -or $reply.ok -or $reply.error -ne 'ORIGINAL_SELECT_FAILURE' -or $reply.error_details.rollback_failures -notcontains 'profiles'){
