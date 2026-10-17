@@ -1,5 +1,9 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
+# NativeBridge declares this encoding before loading the transport module.
+# .NET Framework also uses it when creating a child's stdin StreamWriter;
+# the hosted runner's default UTF-8 writer otherwise emits a BOM first.
+[Console]::InputEncoding=New-Object Text.UTF8Encoding($false)
 . (Join-Path $PSScriptRoot 'Set-OwnedTestRoot.ps1')
 $package=Split-Path -Parent $PSScriptRoot
 Import-Module (Join-Path $package 'SplitVpn.psm1') -Force -DisableNameChecking
@@ -160,25 +164,36 @@ using System.Web.Script.Serialization;
 public static class TorPipeFixture {
     public static int Main() {
         string root = Directory.GetParent(Path.GetDirectoryName(typeof(TorPipeFixture).Assembly.Location)).FullName;
+        try { return Run(root); }
+        catch (Exception error) { return Fail(root, error.GetType().FullName, 99); }
+    }
+    static int Fail(string root, string check, int code) {
+        File.WriteAllText(Path.Combine(root, "fixture-failure.txt"), check);
+        return code;
+    }
+    static int Run(string root) {
         Stream input = Console.OpenStandardInput();
         MemoryStream bytes = new MemoryStream();
         int b;
         while ((b = input.ReadByte()) != -1 && b != 10) {
             bytes.WriteByte((byte)b);
-            if (bytes.Length > 16384) return 2;
+            if (bytes.Length > 16384) return Fail(root, "input_size", 2);
         }
-        if (b != 10) return 3;
+        if (b != 10) return Fail(root, "input_eof", 3);
         string json = new UTF8Encoding(false, true).GetString(bytes.ToArray());
-        if (json.Length == 0 || json[0] == '\ufeff') return 4;
+        if (json.Length == 0 || json[0] == '\ufeff') return Fail(root, "input_encoding", 4);
         var init = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(json);
         string state = Path.Combine(root, "unicode-\u0428\u4ed9", "private", "tor", "state");
         string cache = Path.Combine(root, "unicode-\u0428\u4ed9", "private", "tor", "cache");
-        if (init.Count != 6 || (string)init["state_dir"] != state || (string)init["cache_dir"] != cache || (string)init["interface"] != "7") return 5;
+        if (init.Count != 6) return Fail(root, "field_count", 5);
+        if ((string)init["state_dir"] != state) return Fail(root, "state_path_case_insensitive_match="+String.Equals((string)init["state_dir"],state,StringComparison.OrdinalIgnoreCase), 5);
+        if ((string)init["cache_dir"] != cache) return Fail(root, "cache_path_case_insensitive_match="+String.Equals((string)init["cache_dir"],cache,StringComparison.OrdinalIgnoreCase), 5);
+        if ((string)init["interface"] != "7") return Fail(root, "interface", 5);
         var options = (Dictionary<string, object>)init["tor_options"];
-        if ((string)options["mode"] != "snowflake" || (string)options["bridges"] != "") return 5;
+        if ((string)options["mode"] != "snowflake" || (string)options["bridges"] != "") return Fail(root, "tor_options", 5);
         foreach (string key in new[] {"username", "password"})
-            if (!Regex.IsMatch((string)init[key], "^[a-f0-9]{64}$")) return 6;
-        if ((string)init["username"] == (string)init["password"]) return 7;
+            if (!Regex.IsMatch((string)init[key], "^[a-f0-9]{64}$")) return Fail(root, "credential_format", 6);
+        if ((string)init["username"] == (string)init["password"]) return Fail(root, "credential_uniqueness", 7);
         File.WriteAllText(Path.Combine(root, "child.pid"), Process.GetCurrentProcess().Id.ToString());
         string mode = File.ReadAllText(Path.Combine(root, "mode.txt"));
         if (mode == "exit") return 8;
@@ -208,7 +223,12 @@ Import-Module (Join-Path $package 'Tor.psm1') -Force -DisableNameChecking
     function script:Get-NetAdapter {param($InterfaceIndex,$ErrorAction);[pscustomobject]@{HardwareInterface=$true;Status='Up';ifIndex=7;Name='Fixture';InterfaceGuid='11111111-1111-1111-1111-111111111111'}}
     try {
         [IO.File]::WriteAllText((Join-Path $fixture 'mode.txt'),'ready')
-        $transport=Start-SplitTor $root
+        try {$transport=Start-SplitTor $root}
+        catch {
+            $diagnostic=Join-Path $fixture 'fixture-failure.txt'
+            if(Test-Path -LiteralPath $diagnostic){Write-Host ('Fixture child check: '+[IO.File]::ReadAllText($diagnostic))}
+            throw
+        }
         if(!(Test-SplitTor) -or $transport.port -ne 12345 -or $transport.tor_proxy.udp){throw 'Real helper did not complete UTF-8 startup'}
         $childId=$script:TorProcess.Id
         Stop-SplitTor
