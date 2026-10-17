@@ -91,8 +91,13 @@ Source/mihomo-v1.19.32-source.zip
 """.split()
 
 
-def package(platform, output):
+def package(platform, output, go='go'):
     subprocess.run([sys.executable, str(ROOT / "i2p/sources.py")], check=True)
+    if not (ROOT / "Source/pt-dependencies.zip").exists():
+        subprocess.run([sys.executable, str(ROOT / "pt/licenses.py"), "--source-only", "--go", go], check=True)
+    bridge_expected = (ROOT / "pt/dependencies.sha256").read_text().split()[0]
+    if hashlib.sha256((ROOT / "Source/pt-dependencies.zip").read_bytes()).hexdigest() != bridge_expected:
+        raise ValueError("Bridge dependency source checksum mismatch")
     if not (ROOT / "Source/tor-dependencies.zip").exists():
         subprocess.run([sys.executable, str(ROOT / "tor/licenses.py"), "--source-only"], check=True)
     expected = (ROOT / "tor/dependencies.sha256").read_text().split()[0]
@@ -135,5 +140,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--platform", choices=("windows", "linux"), required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--go", default="go")
     args = parser.parse_args()
-    package(args.platform, args.output)
+    package(args.platform, args.output, args.go)

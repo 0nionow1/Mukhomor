@@ -118,7 +118,7 @@ try {
     Run $Python @('tests/Test-PortableReleasePrivacy.py','--archive',$apk)
     [IO.File]::WriteAllText(($apk+'.sha256'),((Get-FileHash -LiteralPath $apk -Algorithm SHA256).Hash.ToLowerInvariant()+'  '+[IO.Path]::GetFileName($apk)+"`n"))
     $source=Join-Path $stage ('Mukhomor-'+$version+'-android-source.zip')
-    Run $Python @('Package-PortableSource.py','--platform','windows','--output',$source)
+    Run $Python @('Package-PortableSource.py','--platform','windows','--output',$source,'--go',$Go)
     # Only verified outputs replace the previous build of this exact variant.
     foreach($file in @($apk,($apk+'.sha256'),$source,($source+'.sha256'))){Copy-Item -LiteralPath $file -Destination $dist -Force}
     if(Test-Path -LiteralPath ($apk+'.idsig')){Copy-Item -LiteralPath ($apk+'.idsig') -Destination $dist -Force}
