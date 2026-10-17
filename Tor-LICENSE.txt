@@ -1,0 +1,35 @@
+Mukhomor uses Arti, the Tor Project's Rust implementation of Tor, version 0.47.0.
+Arti and its tor-* components are licensed under MIT OR Apache-2.0.
+Mukhomor elects the MIT license for those components.
+Source: https://gitlab.torproject.org/tpo/core/arti
+Pinned dependency graph and checksums: tor/Cargo.lock.
+
+Copyright 2019-2025, The Tor Project, Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Transitive dependency notices and exact source: tor/THIRD_PARTY_NOTICES.txt and Source/tor-dependencies.zip.
+
+Bridge transports use Lyrebird 0.9.0 (commit 89d54872b176), Snowflake 2.14.1,
+obfs4 and WebTunnel from the Tor Project. Exact licenses, checksums and sources:
+pt/THIRD_PARTY_NOTICES.txt, pt/go.sum and Source/pt-dependencies.zip.
+Reviewed local adaptations are reproducible in pt/prepare.py (bound network
+injection and Android interface compatibility) and tor/prepare.py (PT handshake
+timeout and coarse SystemTime limit search). Original dependency
+archives remain unmodified and are shipped with the corresponding source.

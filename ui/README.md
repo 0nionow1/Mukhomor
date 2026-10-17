@@ -32,9 +32,32 @@ regenerating or moving the grain.
 The existing Mukhomor design is the reference, not a starting point for a new
 design. Compare with the approved `assets/preview.png` and
 `assets/appearance-preview.png` references at the same size, theme, locale and state.
-Preserve the 560 × 740 composition, Tiny5 type hierarchy (32/24/16), continuous
+The default window is 560 × 828, reserving 88 pixels for connection types above
+the original hero/list composition. Preserve Tiny5 type hierarchy (32/24/16), continuous
 pixel field, open mushroom interaction, compact 44-pixel server rows, pixel
-icons, stepped corners, primary add button and unfilled bottom navigation.
+icons, stepped corners and primary add button. Bottom navigation uses one
+translucent pixel-stepped capsule aligned to the content's side margins, with
+space between nearly square tabs, icons raised slightly above the captions and a monochrome
+mushroom based on the logo for the connection page. Only the mushroom is enlarged
+to match the other icons' visible height despite its source grid's empty rows.
+Connection types use the same translucent capsule and color selection, with
+pixel server, peer-link and mushroom icons. Own VPS retains the profile list;
+P2P lists Tor and I2P, with a clear distinction between Internet access and
+internal `.i2p` services. The subscription remains an in-development placeholder.
+An existing connection can be stopped from any mode; switching the active P2P
+network requires disconnecting. Mode selection keeps VPS profiles and the
+selected server. Short screens use a compact strip and hero.
+The main mushroom is 168 logical pixels high (previously 144) and sits 8 pixels
+lower in the standard window. Its action caption, current connection/target and
+two-line guidance form separate rows. Tabs never switch the active VPN or jump
+back during polling. Pending requests retain their network/server target;
+server switching, cancellation, recovery and uncertain receipts have explicit
+feedback. Windows can reconnect on profile selection; portable platforms explain
+that disconnection is required first. Notices scroll in the guidance area and
+can be dismissed without shifting the server list.
+Buttons and navigation use color feedback instead of focus/selection outlines.
+Keyboard activation remains available; fields, choices, list rows and checkbox
+indicators retain their focus cues. Toggle rows use only the checkbox's cue.
 Do not introduce enclosing cards, smooth rounded rectangles or substitute
 generic platform styling. Change geometry only to correct a demonstrated bug
 or to accommodate smaller viewports and text scaling.

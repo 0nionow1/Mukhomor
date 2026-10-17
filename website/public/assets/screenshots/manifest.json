@@ -1,0 +1,103 @@
+{
+  "source": "ui/src/preview.rs — isolated Slint renderer, synthetic data only",
+  "screenshots": [
+    {
+      "file": "connection.png",
+      "fixture": "website-connection",
+      "width": 560,
+      "height": 828,
+      "sha256": "a594afa73a51d32a3003fe57a39c36c41cfebb6dbbafaefcefadae43d6f65eaf"
+    },
+    {
+      "file": "import.png",
+      "fixture": "import",
+      "width": 560,
+      "height": 828,
+      "sha256": "b3efa9c8d02eaeb380f8274564d597b7c0aa51d3418f7d64046ab23d8579fae5"
+    },
+    {
+      "file": "rules.png",
+      "fixture": "website-rules",
+      "width": 560,
+      "height": 828,
+      "sha256": "fd260bff85b9ca053f234a0733020753bb90f87b46d75d3cb6945d25a870a966"
+    },
+    {
+      "file": "presets.png",
+      "fixture": "presets",
+      "width": 560,
+      "height": 828,
+      "sha256": "f81f41f428a7c2ccea1c433925350ab950ff9a36d9915ffbafded09752dd6cc9"
+    },
+    {
+      "file": "settings.png",
+      "fixture": "settings",
+      "width": 560,
+      "height": 828,
+      "sha256": "bdea8537220a9f126639b576bd618ce653017ca24e4fa241ed90ccc4c62c03ae"
+    },
+    {
+      "file": "appearance.png",
+      "fixture": "appearance",
+      "width": 560,
+      "height": 828,
+      "sha256": "811d9874c49a4b1795b8b86638003ce3c6198bf5092f0bacbfb836b0a66ab83b"
+    },
+    {
+      "file": "connection-paper.png",
+      "fixture": "website-connection-paper",
+      "width": 560,
+      "height": 828,
+      "sha256": "59791248f4adc66a6fd2147d27d6b1396de3f4caf684b1437a1eb9eff5a2e18e"
+    },
+    {
+      "file": "connection-glacier.png",
+      "fixture": "website-connection-glacier",
+      "width": 560,
+      "height": 828,
+      "sha256": "03954337d66353fc12215155c436adc624d57adc92086cfe3ab2813bcefd0f9f"
+    },
+    {
+      "file": "rules-paper.png",
+      "fixture": "website-rules-paper",
+      "width": 560,
+      "height": 828,
+      "sha256": "2c7da71eb5a79d95daa1901e41d61eb4019745c9df7697c6a38598ccff3c1b9d"
+    },
+    {
+      "file": "rules-glacier.png",
+      "fixture": "website-rules-glacier",
+      "width": 560,
+      "height": 828,
+      "sha256": "8bcb0d884ec199da026c04cf2b78cc03ce04db2dc1d6b91681a40f07abde97ae"
+    },
+    {
+      "file": "presets-paper.png",
+      "fixture": "website-presets-paper",
+      "width": 560,
+      "height": 828,
+      "sha256": "a7a68838b4b2639fc920510c205ae370dcffbacf91baab6379631132737d1305"
+    },
+    {
+      "file": "presets-glacier.png",
+      "fixture": "website-presets-glacier",
+      "width": 560,
+      "height": 828,
+      "sha256": "e5bebbc45121b1b8bb92ab591904de724f4380b5548ee33fcb366df021d93fb8"
+    },
+    {
+      "file": "appearance-paper.png",
+      "fixture": "website-appearance-paper",
+      "width": 560,
+      "height": 828,
+      "sha256": "2fe3ef67f6beae90fa98bda13395947e1ee1419d49da19bc88f71b79f7c7418f"
+    },
+    {
+      "file": "appearance-glacier.png",
+      "fixture": "website-appearance-glacier",
+      "width": 560,
+      "height": 828,
+      "sha256": "f8e100f9c31cd2e80d48d7132d34d9a74b6f0421cf2cba43791717031c81a5a5"
+    }
+  ]
+}

@@ -14,7 +14,20 @@ import (
 
 func main() {
 	root := flag.String("root", "", "Private application data directory")
+	checkTor := flag.Bool("check-tor-guards", false, "Refuse removal while Tor traffic protection is retained")
 	flag.Parse()
+	if *checkTor {
+		present, err := core.TorGuardsPresent()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Cannot inspect Tor traffic protection")
+			os.Exit(2)
+		}
+		if present {
+			fmt.Fprintln(os.Stderr, "Disconnect Tor in Mukhomor before uninstalling")
+			os.Exit(1)
+		}
+		return
+	}
 	if *root == "" {
 		fmt.Fprintln(os.Stderr, "--root is required")
 		os.Exit(2)

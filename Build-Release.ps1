@@ -1,9 +1,33 @@
-param([string]$Version='',[switch]$Offline)
+param([string]$Version='',[switch]$Offline,[string]$Python='python',[string]$Go='go')
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 Import-Module (Join-Path $PSScriptRoot 'SplitVpn.psm1') -Force -DisableNameChecking
 Import-Module (Join-Path $PSScriptRoot 'ReleasePe.psm1') -Force -DisableNameChecking
 $native=Join-Path $PSScriptRoot 'native'
+& (Join-Path $PSScriptRoot 'i2p\windows-build.ps1') -Platform windows
+& $Python (Join-Path $PSScriptRoot 'i2p\sources.py')
+if($LASTEXITCODE -ne 0){throw 'I2P source packaging failed'}
+$torPrepare=@((Join-Path $PSScriptRoot 'tor\prepare.py'));if($Offline){$torPrepare+='--offline'}
+& $Python @torPrepare
+if($LASTEXITCODE -ne 0){throw 'Tor source preparation failed'}
+& $Python (Join-Path $PSScriptRoot 'pt\prepare.py') --go $Go
+if($LASTEXITCODE -ne 0){throw 'Bridge source preparation failed'}
+if(!(Test-Path -LiteralPath (Join-Path $PSScriptRoot 'Source\pt-dependencies.zip'))){
+    $ptSourceArgs=@((Join-Path $PSScriptRoot 'pt\licenses.py'),'--go',$Go,'--source-only');if($Offline){$ptSourceArgs+='--offline'}
+    & $Python @ptSourceArgs
+    if($LASTEXITCODE -ne 0){throw 'Pinned bridge source preparation failed'}
+}
+$ptSourcePin=([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'pt\dependencies.sha256')) -split '\s+')[0]
+if($ptSourcePin -cnotmatch '^[a-f0-9]{64}$' -or (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'Source\pt-dependencies.zip')).Hash.ToLowerInvariant() -cne $ptSourcePin){throw 'Pinned bridge source checksum mismatch'}
+Push-Location (Join-Path $PSScriptRoot 'pt')
+try {& $Go @('build','-modfile=../target/pt-sources/windows/pt.mod','-mod=readonly','-trimpath','-ldflags=-s -w -H=windowsgui','-o','../target/pt-sources/mukhomor-pt.exe','.');if($LASTEXITCODE -ne 0){throw 'Bridge transport build failed'}}finally{Pop-Location}
+if(!(Test-Path -LiteralPath (Join-Path $PSScriptRoot 'Source\tor-dependencies.zip'))){
+    $sourceArgs=@((Join-Path $PSScriptRoot 'tor\licenses.py'),'--source-only');if($Offline){$sourceArgs+='--offline'}
+    & $Python @sourceArgs
+    if($LASTEXITCODE -ne 0){throw 'Pinned Tor source preparation failed'}
+}
+$torSourcePin=([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'tor\dependencies.sha256')) -split '\s+')[0]
+if($torSourcePin -cnotmatch '^[a-f0-9]{64}$' -or (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'Source\tor-dependencies.zip')).Hash.ToLowerInvariant() -cne $torSourcePin){throw 'Pinned Tor source checksum mismatch'}
 if(!$Version){$match=[regex]::Match([IO.File]::ReadAllText((Join-Path $native 'Cargo.toml')),'(?m)^version = "(\d+\.\d+\.\d+)"$');if(!$match.Success){throw 'Missing Cargo version'};$Version=$match.Groups[1].Value}
 if($Version -notmatch '^\d+\.\d+\.\d+$'){throw 'Invalid version'}
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'tests\Test-PublicSource.ps1')
@@ -19,6 +43,9 @@ try {
         if($Offline){$buildArgs+='--offline'}
         & cargo.exe @buildArgs
         if($LASTEXITCODE -ne 0){throw 'Native build failed'}
+        $torArgs=@('build','--manifest-path','../tor/Cargo.toml','--locked','--release');if($Offline){$torArgs+='--offline'}
+        & cargo.exe @torArgs
+        if($LASTEXITCODE -ne 0){throw 'Tor transport build failed'}
     }finally{Pop-Location}
 }finally{$env:CARGO_ENCODED_RUSTFLAGS=$oldFlags}
 $releasePePin=$null
@@ -42,8 +69,19 @@ function Copy-Reviewed([string]$Relative,[string]$Destination){
     [IO.Directory]::CreateDirectory((Split-Path -Parent $output))|Out-Null
     [IO.File]::Copy($input,$output,$false)
 }
-$common=@('AppStartup.ps1','NativeBridge.ps1','SplitVpn.psm1','RulePresets.ps1','RuleNormalizer.cs','SplitWindows.psm1','TrafficGuard.psm1','ProfileImport.psm1','Install.ps1','Uninstall.ps1','README.md','Mihomo-LICENSE.txt','Wintun-LICENSE.txt','Rules-LICENSE.txt','ThirdParty-LICENSE.txt','Tiny5-LICENSE.txt','LICENSE','assets\settings.default.json','assets\README.ru.md','assets\preview.png','lists\sources.json','lists\seed-games.list','lists\seed-russia.list','lists\seed-steam.list','lists\seed-ozon.list')
+$common=@('AppStartup.ps1','NativeBridge.ps1','SplitVpn.psm1','RulePresets.ps1','RuleNormalizer.cs','SplitWindows.psm1','TrafficGuard.psm1','Tor.psm1','Tor-LICENSE.txt','ProfileImport.psm1','Install.ps1','Uninstall.ps1','README.md','Mihomo-LICENSE.txt','Wintun-LICENSE.txt','Rules-LICENSE.txt','ThirdParty-LICENSE.txt','Tiny5-LICENSE.txt','LICENSE','assets\settings.default.json','assets\README.ru.md','assets\preview.png','lists\sources.json','lists\seed-games.list','lists\seed-russia.list','lists\seed-steam.list','lists\seed-ozon.list')
 foreach($file in $common){Copy-Reviewed $file $runtime;Copy-Reviewed $file $source}
+foreach($file in @('tor\Cargo.toml','tor\Cargo.lock','tor\src\main.rs','tor\licenses.py','tor\MPL-2.0.txt','tor\THIRD_PARTY_NOTICES.txt','tor\dependencies.sha256','core\tor.go','core\tor_test.go','core\tor_guard_linux.go','core\tor_guard_other.go','tests\Test-Tor.ps1','tests\tor_fixture.py','docs\tor.md')){Copy-Reviewed $file $source}
+foreach($file in @('i2p\main.cpp','i2p\CMakeLists.txt','i2p\prepare.py','i2p\build.py','i2p\windows-build.ps1','i2p\sources.py','i2p\THIRD_PARTY_NOTICES.txt','i2p\dependencies.sha256','pt\i2p.go','pt\i2p_test.go','pt\i2p_process_windows.go','pt\i2p_process_other.go','core\i2p_test.go','docs\p2p.md','pt\i2p-reseed\acetone_at_mail.i2p.crt','pt\i2p-reseed\admin_at_likogan.dev.crt','pt\i2p-reseed\admin_at_stormycloud.org.crt','pt\i2p-reseed\creativecowpat_at_mail.i2p.crt','pt\i2p-reseed\diyarciftci_at_protonmail.com.crt','pt\i2p-reseed\echelon3_at_mail.i2p.crt','pt\i2p-reseed\hankhill19580_at_gmail.com.crt','pt\i2p-reseed\i2p-reseed_at_mk16.de.crt','pt\i2p-reseed\igor_at_novg.net.crt','pt\i2p-reseed\lazygravy_at_mail.i2p.crt','pt\i2p-reseed\orignal_at_mail.i2p.crt','pt\i2p-reseed\r4sas-reseed_at_mail.i2p.crt','pt\i2p-reseed\rambler_at_mail.i2p.crt','pt\i2p-reseed\reseed_at_diva.exchange.crt','pt\i2p-reseed\sahil_at_mail.i2p.crt','pt\i2p-reseed\vserod1488_at_proton.me.crt','Source\i2p-dependencies.zip')){Copy-Reviewed $file $source}
+foreach($file in @('docs\p2p.md','i2p\THIRD_PARTY_NOTICES.txt','i2p\dependencies.sha256','Source\i2p-dependencies.zip')){Copy-Reviewed $file $runtime}
+Copy-Reviewed 'docs\tor.md' $runtime
+Copy-Reviewed 'tor\THIRD_PARTY_NOTICES.txt' $runtime
+Copy-Reviewed 'tor\dependencies.sha256' $runtime
+Copy-Reviewed 'Source\tor-dependencies.zip' $runtime
+Copy-Reviewed 'Source\tor-dependencies.zip' $source
+foreach($file in @('native\src\tor_options.rs','tor\src\bridges.rs','tor\prepare.py','pt\go.mod','pt\go.sum','pt\main.go','pt\main_test.go','pt\dns_test.go','pt\underlay.go','pt\socket_windows.go','pt\socket_linux.go','pt\socket_android.go','pt\prepare.py','pt\licenses.py','pt\THIRD_PARTY_NOTICES.txt','pt\dependencies.sha256','Source\pt-dependencies.zip')){Copy-Reviewed $file $source}
+Copy-Reviewed 'pt\THIRD_PARTY_NOTICES.txt' $runtime
+Copy-Reviewed 'Source\pt-dependencies.zip' $runtime
 Copy-Reviewed 'Slint-LICENSE.txt' $source
 Copy-Reviewed 'native\src\app_update.rs' $source
 Copy-Reviewed 'tests\linux-update.py' $source
@@ -55,10 +93,16 @@ foreach($file in $publication){Copy-Reviewed $file $runtime;Copy-Reviewed $file 
 foreach($file in @('.gitattributes','.github\PULL_REQUEST_TEMPLATE.md','.github\ISSUE_TEMPLATE\bug_report.md','.github\ISSUE_TEMPLATE\feature_request.md','.github\workflows\ci.yml','.github\workflows\release.yml','tests\Test-PublicSource.ps1','tests\Run-Checks.ps1')){Copy-Reviewed $file $source}
 foreach($file in @('.gitignore','Build-Release.ps1','ReleasePe.psm1','Fetch-Dependencies.ps1','native\Cargo.toml','native\Cargo.lock','native\build.rs','native\windows.manifest','native\README.md','assets\theme.json','assets\fonts\Tiny5-Regular.ttf','assets\fonts\README.md')){Copy-Reviewed $file $source}
 foreach($file in @('ui\Cargo.toml','ui\Cargo.lock','ui\build.rs','ui\README.md','ui\src\lib.rs','ui\src\state.rs','ui\src\preview.rs','ui\src\visuals.rs','native\visual_build.rs','ui\views\app.slint','native\src\slint_host.rs')){Copy-Reviewed $file $source}
-foreach($name in @('main.rs','desktop.rs','backend.rs','profile_store.rs','autostart.rs','platform.rs','service.rs','setup.rs','setup_recovery.rs','cleanup_request.rs','hero_motion.rs','presets.rs','i18n.rs','design.rs','appearance.rs','mushroom.rs','traffic_guard.rs','traffic_guard_cli.rs','traffic_guard_tun.rs')){Copy-Reviewed ('native\src\'+$name) $source}
+foreach($name in @('main.rs','desktop.rs','backend.rs','profile_store.rs','autostart.rs','platform.rs','service.rs','setup.rs','setup_recovery.rs','cleanup_request.rs','hero_motion.rs','presets.rs','i18n.rs','design.rs','appearance.rs','mushroom.rs','mushroom_data.rs','traffic_guard.rs','traffic_guard_cli.rs','traffic_guard_tun.rs')){Copy-Reviewed ('native\src\'+$name) $source}
+Copy-Reviewed 'assets\mushroom-art.json' $source
 foreach($name in @('Test-AppStartup.ps1','Test-SplitVpn.ps1','Test-RulePresets.ps1','Test-ProfileImport.ps1','Test-ProtocolTransport.ps1','Test-CoreRouting.ps1','Test-LargeRules.ps1','Measure-Routing.ps1','Measure-NativeControl.ps1','routing-benchmark.cjs','Test-UdpRouting.ps1','Test-NativeApp.ps1','Test-Disconnect.ps1','Test-Isolation.ps1','Test-ReleasePrivacy.ps1','Test-PixelFont.ps1','Test-Lifecycle.ps1','Test-Upgrade.ps1','Test-Transport.ps1','Test-StartupRecovery.ps1','Test-StartupCancellation.ps1','Test-DnsRecovery.ps1','udp-client.cjs','local-origin.cjs','proxy-client.cjs')){if(Test-Path -LiteralPath (Join-Path $PSScriptRoot ('tests\'+$name))){Copy-Reviewed ('tests\'+$name) $source}}
 $nativeTarget=if($env:CARGO_TARGET_DIR){[IO.Path]::GetFullPath($env:CARGO_TARGET_DIR)}else{Join-Path $native 'target'}
 [IO.File]::Copy((Join-Path $nativeTarget 'release\mukhomor.exe'),(Join-Path $runtime 'mukhomor.exe'),$false)
+$torTarget=if($env:CARGO_TARGET_DIR){[IO.Path]::GetFullPath($env:CARGO_TARGET_DIR)}else{Join-Path $PSScriptRoot 'tor\target'}
+[IO.Directory]::CreateDirectory((Join-Path $runtime 'bin'))|Out-Null
+[IO.File]::Copy((Join-Path $torTarget 'release\mukhomor-tor.exe'),(Join-Path $runtime 'bin\mukhomor-tor.exe'),$false)
+[IO.File]::Copy((Join-Path $PSScriptRoot 'target\pt-sources\mukhomor-pt.exe'),(Join-Path $runtime 'bin\mukhomor-pt.exe'),$false)
+[IO.File]::Copy((Join-Path $PSScriptRoot 'target\i2p-sources\windows\native\mukhomor-i2pd.exe'),(Join-Path $runtime 'bin\mukhomor-i2pd.exe'),$false)
 # Inspect and hash the packaged bytes through one READ/shareREAD handle.
 # Retain it through manifests and ZIP creation; dispose on every exit.
 $releasePePin=Open-ReleasePe (Join-Path $runtime 'mukhomor.exe')

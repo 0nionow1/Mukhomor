@@ -11,7 +11,7 @@ mod mushroom;
 mod visual_build;
 
 fn icon(out: &Path, colors: &[u32]) {
-    let palette = mushroom::palette(colors[0], colors[6], colors[5], colors[9], false);
+    let palette = mushroom::rgb_palette(colors[0], colors[6], colors[5], colors[9], false);
     let sizes = [16usize, 20, 24, 32, 40, 48, 64, 96, 128, 256];
     let images: Vec<_> = sizes
         .into_iter()
@@ -39,6 +39,7 @@ fn main() {
         .expect("assets/theme.json is required");
     println!("cargo:rerun-if-changed=../assets/theme.json");
     println!("cargo:rerun-if-changed=src/mushroom.rs");
+    println!("cargo:rerun-if-changed=src/mushroom_data.rs");
     println!("cargo:rerun-if-changed=visual_build.rs");
     let colors = visual_build::generate(&out, &source);
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") { return; }

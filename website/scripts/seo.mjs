@@ -19,7 +19,7 @@ function renderFooter(file, note, repo) {
   return `<footer class="site-footer wrap" aria-label="Подвал сайта">
     <div class="footer-main">
       <div class="footer-identity">
-        <a class="footer-brand" href="./" aria-label="Мухомор — на главную"${file === 'index.html' ? ' aria-current="page"' : ''}><img src="assets/mushroom-mini.svg" width="60" height="48" alt="" loading="lazy"><span>Мухомор</span></a>
+        <a class="footer-brand" href="./" aria-label="Мухомор — на главную"${file === 'index.html' ? ' aria-current="page"' : ''}><img src="assets/mushroom-mini.svg?v=artwork-2" width="60" height="48" alt="" loading="lazy"><span>Мухомор</span></a>
         <p class="footer-fine">${note}</p>
       </div>
       <nav class="footer-nav" aria-label="Разделы сайта">
@@ -49,7 +49,7 @@ export async function syncSeo(checkOnly = false) {
   const urls = ['index.html', 'docs.html', 'changelog.html', 'faq.html', 'privacy.html', 'policy.html', 'releases.html'];
   const url = file => new URL(file === 'index.html' ? './' : file, base).href;
   const repo = config.repository;
-  assert(repo === 'https://github.com/0nionow1/Mukhomor', 'Unexpected project repository');
+  assert(repo === 'https://github.com/Mukhomo/Mukhomor', 'Unexpected project repository');
   const analytics = config.analytics;
   assert(typeof analytics.enabled === 'boolean' && Object.keys(analytics).every(key => ['enabled', 'endpoint', 'turnstileSiteKey'].includes(key)), 'Only public analytics settings belong in site.json');
   if (analytics.enabled) {
@@ -74,7 +74,7 @@ export async function syncSeo(checkOnly = false) {
     downloadUrl: url('releases.html'), releaseNotes: url('changelog.html'),
     license: `${repo}/blob/main/LICENSE`, isAccessibleForFree: true, inLanguage: ['ru', 'en'],
     screenshot: url('assets/app-preview.png'), sameAs: [repo],
-    softwareRequirements: 'Собственный VPS с VPN и клиентский профиль. Для Mycelia нужна совместимая сборка.'
+    softwareRequirements: 'Для своего VPS нужен клиентский профиль. В 0.8.8 доступны Tor и внутренняя сеть I2P. Linux требует glibc 2.38+. Для Mycelia нужна совместимая сборка.'
   };
   for (const file of urls) {
     const path = new URL(file, root);
@@ -108,6 +108,7 @@ export async function syncSeo(checkOnly = false) {
     html = html.replace(footer[0], renderFooter(file, note, repo));
     html = html.replace(/\n  <meta http-equiv="Content-Security-Policy"[^>]+>/g, '');
     if(!html.includes('src="content.js"')) html=html.replace('</head>','  <link rel="stylesheet" href="content.css">\n  <script src="content-config.js" defer></script>\n  <script src="content-snapshot.js" defer></script>\n  <script src="content.js" defer></script>\n</head>');
+    if(!html.includes('href="visuals.css"')) html=html.replace('</head>','  <link rel="stylesheet" href="visuals.css">\n</head>');
     html = html.replace('<meta charset="utf-8">', `<meta charset="utf-8">\n  <meta http-equiv="Content-Security-Policy" content="${escape(policy)}">`);
     html = html.replace(/\n  <style id="navigation-critical">[\s\S]*?<\/style>/g, '')
       .replace(/\n  <script src="navigation\.js"><\/script>/g, '');

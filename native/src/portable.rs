@@ -92,13 +92,16 @@ pub fn transport(root: &Path) -> Result<Transport, String> {
         let failed=result.is_err();
         if sender.send(result).is_err() || failed { break; }
     });
+    let cancel_path=root.join("tor-cancel");
     let process=Arc::new(Mutex::new(Process{child,input,output}));
     Ok(Arc::new(move |request| {
+        if request["action"] == "Connect" && mukhomor_ui::state::is_p2p(&request["network"]) { let _=std::fs::remove_file(&cancel_path); }
+        if request["action"] == "Disconnect" || request["action"] == "Exit" { let _=std::fs::write(&cancel_path,b"cancel"); }
         let mut p=process.lock().map_err(|_| "Controller lock failed")?;
         let bytes=serde_json::to_vec(&request).map_err(|e| e.to_string())?;
         if bytes.len()>4*1024*1024 { return Err("Request exceeds size limit".into()); }
         p.input.write_all(&bytes).and_then(|_| p.input.write_all(b"\n")).and_then(|_| p.input.flush()).map_err(|e| e.to_string())?;
-        let seconds=if request["action"] == "Update" { 120 } else { 45 };
+        let seconds=if request["action"] == "Connect" && mukhomor_ui::state::is_p2p(&request["network"]) { 600 } else if request["action"] == "Update" { 120 } else { 45 };
         p.output.recv_timeout(std::time::Duration::from_secs(seconds)).map_err(|_|"VPN controller stopped responding; restart Mukhomor".to_owned())?
     }))
 }

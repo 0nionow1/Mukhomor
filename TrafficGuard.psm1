@@ -1,4 +1,4 @@
-Set-StrictMode -Version Latest
+﻿Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 Import-Module (Join-Path $PSScriptRoot 'SplitVpn.psm1') -DisableNameChecking
 
@@ -15,6 +15,9 @@ function Invoke-SplitTrafficGuard([string]$Root, [ValidateSet('preview','arm','u
         $result=Invoke-SplitBoundedProcess $exe $arguments 5000 'Windows traffic protection'
         if (!(Test-Path -LiteralPath $output -PathType Leaf) -or (Get-Item -LiteralPath $output).Length -gt 16384) {throw 'Traffic protection helper returned no bounded result'}
         $reply=Read-JsonFile $output
+        if ($result.exit_code -ne 0 -and $reply.ContainsKey('error') -and $reply.error -eq 'WFP_HIGHER_PRIORITY_PERMIT') {
+            throw 'Disconnect the other VPN: its Windows rules interfere with Mukhomor protection.'
+        }
         if ($result.exit_code -ne 0) {throw ('Windows traffic protection failed: '+$(if($reply.ContainsKey('error')){[string]$reply.error}else{'helper error'}))}
         return $reply
     } finally {
@@ -22,6 +25,16 @@ function Invoke-SplitTrafficGuard([string]$Root, [ValidateSet('preview','arm','u
     }
 }
 function New-SplitTrafficGuardPlan([string]$Root, $Settings, $Transport) {
+    if($Transport.ContainsKey('network') -and $Transport.network -in @('tor','i2p')){
+        Import-Module (Join-Path $PSScriptRoot 'Tor.psm1') -DisableNameChecking
+        $options=Get-SplitTorOptions $Root
+        $program=Get-SplitTorPath $Root;$kind='tor'
+        if($Transport.network -eq 'i2p' -or $options.mode -ne 'direct'){
+            $program=Join-Path (Split-Path -Parent $program) 'mukhomor-pt.exe'
+            $kind=if($Transport.network -eq 'tor' -and $options.mode -in @('snowflake','snowflake-amp')){'tor-snowflake'}else{'tor-bridges'}
+        }
+        return @{schema=2;transport=$kind;core_executable=$program;tunnel_luid=[uint64]0;allow_private_lan=$false;endpoints=@()}
+    }
     $proxy=Get-SelectedSplitProxy $Root
     $protocols=switch([string]$proxy.type) {
         'wireguard' {@('udp')}

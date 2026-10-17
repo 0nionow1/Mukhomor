@@ -57,11 +57,14 @@ static jbyteArray result_bytes(JNIEnv *env, char *text) {
     return result;
 }
 
-JNIEXPORT jbyteArray JNICALL Java_org_mukhomor_app_NativeBridge_nativeRequest(JNIEnv *env, jclass cls, jbyteArray root, jbyteArray request, jint fd) {
+JNIEXPORT jbyteArray JNICALL Java_org_mukhomor_app_NativeBridge_nativeRequest(JNIEnv *env, jclass cls, jbyteArray root, jbyteArray request, jbyteArray torPath, jint fd) {
     (void)cls;
     char *r=copy_bytes(env, root, 4096), *q=copy_bytes(env, request, 4*1024*1024);
     if (!r || !q) { free(r); free(q); return NULL; }
-    char *out=mukhomor_request(r,q,fd);
+    char *t=copy_bytes(env,torPath,4096);
+    if(!t){free(r);free(q);return NULL;}
+    char *out=mukhomor_request(r,q,t,fd);
+    free(t);
     free(r); free(q);
     return result_bytes(env,out);
 }

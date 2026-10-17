@@ -3,6 +3,7 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 import { resolve, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Script } from 'node:vm';
+import { createHash } from 'node:crypto';
 import { syncChangelog } from './changelog.mjs';
 import { syncSeo } from './seo.mjs';
 import { syncContent } from './content.mjs';
@@ -33,7 +34,8 @@ for (const [file, { text, ids }] of html) {
     const url = match[1];
     if (/^https:\/\//.test(url)) continue;
     check(!url.startsWith('/'), `Root-relative URL breaks project hosting: ${url}`);
-    const [pathname, hash] = url.split('#');
+    const [pathAndQuery, hash] = url.split('#');
+    const pathname = pathAndQuery.split('?')[0];
     const target = pathname ? resolve(dirname(file), pathname + (pathname.endsWith('/') ? 'index.html' : '')) : file;
     check(target.startsWith(root), `URL leaves public folder: ${url}`);
     check((await stat(target)).isFile(), `Missing target: ${url}`);
@@ -45,13 +47,32 @@ for (const [file, { text, ids }] of html) {
 }
 for (const file of files.filter(path => path.endsWith('.css'))) {
   const css = await readFile(file, 'utf8');
-  for (const match of css.matchAll(/url\(['"]?([^)'"\s]+)['"]?\)/g)) check((await stat(resolve(dirname(file), match[1]))).isFile(), `Missing CSS asset: ${match[1]}`);
+  for (const match of css.matchAll(/url\(['"]?([^)'"\s]+)['"]?\)/g)) {
+    if (match[1].startsWith('#')) {
+      const stylesheet = relative(root, file).replaceAll('\\', '/');
+      const consumers = [...html.values()].filter(page => [...page.text.matchAll(/\bhref="([^"]+)"/g)].some(link=>link[1].split(/[?#]/)[0]===stylesheet));
+      check(consumers.length && consumers.every(page => page.ids.includes(match[1].slice(1))), `Missing inline SVG reference: ${match[1]}`);
+    } else check((await stat(resolve(dirname(file), match[1].split(/[?#]/)[0]))).isFile(), `Missing CSS asset: ${match[1]}`);
+  }
 }
 for (const file of files.filter(path => path.endsWith('.js'))) new Script(await readFile(file, 'utf8'));
 check(files.some(file => file.endsWith('.nojekyll')), 'Missing .nojekyll');
 check(files.some(file => file.endsWith('Tiny5-LICENSE.txt')), 'Missing font license');
 const home = html.get(resolve(root, 'index.html')).text;
 check(home.includes('Mycelia'), 'Use the requested protocol name');
-check(home.includes('В разработке') && home.includes('Нужен свой VPS'), 'Connection availability must be explicit');
+check(home.includes('В разработке') && home.includes('Свой VPS или P2P.') && home.includes('Tor для TCP') && home.includes('.i2p'), 'Connection availability must be explicit');
 check(home.includes('data-enter') && home.includes('id="story"'), 'Read more transition needs a real anchor fallback');
+// Theme variants are selected dynamically, so ordinary href/src checks miss them.
+const shots = resolve(root, 'assets/screenshots');
+const manifest = JSON.parse(await readFile(resolve(shots, 'manifest.json'), 'utf8'));
+for (const entry of manifest.screenshots) {
+  check(/^[a-z-]+\.png$/.test(entry.file), 'Invalid screenshot filename');
+  const png = await readFile(resolve(shots, entry.file));
+  check(png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])), 'Invalid screenshot PNG');
+  check(png.readUInt32BE(16) === entry.width && png.readUInt32BE(20) === entry.height, 'Screenshot dimensions differ from manifest');
+  check(createHash('sha256').update(png).digest('hex') === entry.sha256, 'Screenshot differs from rendered manifest');
+}
+for (const screen of ['connection', 'rules', 'presets', 'appearance']) {
+  for (const suffix of ['', '-paper', '-glacier']) check(manifest.screenshots.some(entry => entry.file === `${screen}${suffix}.png`), `Missing gallery variant: ${screen}${suffix}`);
+}
 console.log(`PASS: ${checks} checks; ${files.length} public files. Relative links, anchors, assets, metadata, content constraints and JavaScript syntax verified.`);

@@ -49,7 +49,7 @@ def main():
     # Rust build directories can contain hundreds of thousands of files, with
     # temporary paths disappearing during compilation. Exclude them from Go's
     # module discovery without touching either language's source tree.
-    for build in [ROOT / "target", ROOT / "native/target", ROOT / "ui/target"]:
+    for build in [ROOT / "target", ROOT / "native/target", ROOT / "ui/target", ROOT / "tor/target"]:
         build.mkdir(parents=True, exist_ok=True)
         boundary = build / "go.mod"
         if not boundary.exists():

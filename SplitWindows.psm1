@@ -176,19 +176,39 @@ function Get-SplitTransport([string]$Root, [scriptblock]$Resolver=${function:Res
     throw 'No ordinary network adapter can reach the VPN endpoint. Disconnect other VPNs and check the network.'
 }
 
-function Assert-SplitAwgHealth([string]$Root, [string]$Phase) {
+function Assert-SplitAwgHealth([string]$Root, [string]$Phase, [int]$Deadline=8000, [string]$Network='vps', [switch]$SingleAttempt) {
     Assert-SplitNotCancelled $Root
+    if($Network -eq 'i2p' -and !$SingleAttempt){
+        # Local tunnels can be ready before a remote destination's LeaseSet.
+        # Retry transient refusals within one deadline, with protection intact.
+        $budget=[Diagnostics.Stopwatch]::StartNew();$failure=$null
+        while($budget.ElapsedMilliseconds -lt ($Deadline-1000)){
+            Assert-SplitNotCancelled $Root
+            try {
+                Assert-SplitAwgHealth $Root $Phase -Deadline ([int]($Deadline-$budget.ElapsedMilliseconds)) -Network $Network -SingleAttempt
+                return
+            } catch {$failure=$_}
+            Assert-SplitNotCancelled $Root
+            $retryAt=[Math]::Min($Deadline-1000,$budget.ElapsedMilliseconds+2000)
+            while($budget.ElapsedMilliseconds -lt $retryAt){Assert-SplitNotCancelled $Root;Start-Sleep -Milliseconds 25}
+        }
+        Assert-SplitNotCancelled $Root
+        if($failure){throw $failure}
+        throw "VPN connection check timed out ($Phase)."
+    }
     $context=Get-CoreApiContext $Root
     $probes=New-Object 'Collections.Generic.List[object]'
     $clock=[Diagnostics.Stopwatch]::StartNew()
     try {
-        foreach ($url in @('https://www.gstatic.com/generate_204','https://cp.cloudflare.com/generate_204')) {
-            $request=[Net.HttpWebRequest]::Create($context.url+'/proxies/AWG/delay?timeout=7000&url='+[Uri]::EscapeDataString($url))
-            $request.Proxy=$null;$request.Timeout=8000;$request.ReadWriteTimeout=1000
+        $urls=@('https://www.gstatic.com/generate_204','https://cp.cloudflare.com/generate_204')
+        if($Network -eq 'i2p'){$urls=@('http://shx5vqsw7usdaunyzr2qmes2fq37oumybpudrd4jjj4e4vk4uusa.b32.i2p/hosts.txt')}
+        foreach ($url in $urls) {
+            $request=[Net.HttpWebRequest]::Create($context.url+('/proxies/AWG/delay?timeout='+($Deadline-1000)+'&url=')+[Uri]::EscapeDataString($url))
+            $request.Proxy=$null;$request.Timeout=$Deadline;$request.ReadWriteTimeout=1000
             $request.Headers['Authorization']='Bearer '+$context.token
             $probes.Add(@{request=$request;pending=$request.BeginGetResponse($null,$null);finished=$false})
         }
-        while($clock.ElapsedMilliseconds -lt 8000) {
+        while($clock.ElapsedMilliseconds -lt $Deadline) {
             Assert-SplitNotCancelled $Root
             $waiting=$false
             foreach($probe in $probes) {
@@ -249,7 +269,7 @@ function Assert-SplitTunDns([string]$Server='198.18.0.2',[int]$Port=53) {
     finally {$client.Dispose()}
 }
 
-function Start-SplitSession([string]$Root, [bool]$TunEnabled=$true) {
+function Start-SplitSession([string]$Root, [bool]$TunEnabled=$true, [string]$Network='vps') {
     Assert-SplitNotCancelled $Root
     if ($TunEnabled -and !(Test-SplitAdmin)) { throw 'Run START.cmd as administrator to use TUN' }
     if ($TunEnabled -and !(Test-Path -LiteralPath (Join-Path (Split-Path -Parent (Get-CorePath $Root)) 'wintun.dll'))) { throw 'Signed Wintun DLL is missing' }
@@ -258,13 +278,21 @@ function Start-SplitSession([string]$Root, [bool]$TunEnabled=$true) {
     if (Test-Path -LiteralPath (Join-Path $Root 'runtime\dns-backup.json')) { Restore-SessionDns $Root }
     $s=Get-SplitSettings $Root
     $full=($TunEnabled -and $s.ContainsKey('routing') -and $s.routing.mode -ceq 'full')
-    $transport=Get-SplitTransport $Root
-    Assert-SplitNotCancelled $Root
-    Set-SplitConfig $Root $s $false -Transport $transport
-    $configPath=Join-Path $Root 'private\config.json'
-    Assert-SplitNotCancelled $Root
     $core=$null
     try {
+    if($Network -in @('tor','i2p')){
+        if(!$TunEnabled){throw 'P2P requires a protected TUN session'}
+        Import-Module (Join-Path $PSScriptRoot 'Tor.psm1') -DisableNameChecking
+        [IO.File]::WriteAllText((Join-Path $Root 'private\tor-mode'),$Network)
+        $s=Convert-ToMap ($s|ConvertTo-Json -Depth 40|ConvertFrom-Json);$s.routing.mode='full';$s.routing.allow_lan=$false;$full=$true
+        Enable-SplitTrafficGuard $Root $s @{network=$Network;server='P2P';port=0;selected_address=''}
+        $p2pClock=[Diagnostics.Stopwatch]::StartNew()
+        $transport=Start-SplitTor $Root $Network
+    }else{$transport=Get-SplitTransport $Root}
+    Assert-SplitNotCancelled $Root
+    Set-SplitConfig $Root $s $false -Transport $transport -SessionOnly:($Network -in @('tor','i2p'))
+    $configPath=Join-Path $Root 'private\config.json'
+    Assert-SplitNotCancelled $Root
         if ($full) {Enable-SplitTrafficGuard $Root $s $transport}
         $program=Get-CorePath $Root
         $core=Start-Process -FilePath $program -ArgumentList @('-d',('"'+$Root+'"'),'-f',('"'+$configPath+'"')) -WorkingDirectory $Root -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $Root 'runtime\logs\core.log') -RedirectStandardError (Join-Path $Root 'runtime\logs\core-error.log')
@@ -278,10 +306,10 @@ function Start-SplitSession([string]$Root, [bool]$TunEnabled=$true) {
             try { Invoke-CoreApi $Root '/version' -TimeoutSeconds 1 | Out-Null; $ready=$true; break } catch { Start-Sleep -Milliseconds 100 }
         }
         if (!$ready) { throw 'Mihomo controller did not start' }
-        Assert-SplitAwgHealth $Root 'before TUN'
+        if($Network -notin @('tor','i2p')){Assert-SplitAwgHealth $Root 'before TUN'}
         if (Test-Path -LiteralPath (Join-Path $Root 'runtime\stop.request')) { throw 'Startup cancelled' }
         if ($TunEnabled) {
-            Set-SplitConfig $Root $s $true -Reload -Transport $transport
+            Set-SplitConfig $Root $s $true -Reload -Transport $transport -SessionOnly:($Network -in @('tor','i2p'))
             $adapterReady=$false
             for ($i=0;$i -lt 40;$i++) {
                 $adapter=Get-NetAdapter -Name 'Mukhomor' -ErrorAction SilentlyContinue
@@ -294,7 +322,10 @@ function Start-SplitSession([string]$Root, [bool]$TunEnabled=$true) {
             Set-SplitTunFirewall $Root
             # A working proxy before TUN does not prove that outer UDP survives
             # the new routes. Verify it again before touching adapter DNS.
-            Assert-SplitAwgHealth $Root 'after TUN routing'
+            # I2P can form local tunnels long before a remote LeaseSet arrives.
+            # Share one eight-minute budget with bootstrap instead of aborting
+            # a cold destination after a separate fixed 90-second allowance.
+            Assert-SplitAwgHealth $Root 'after TUN routing' -Network $Network -Deadline $(if($Network -eq 'i2p'){[Math]::Max(1000,480000-[int]$p2pClock.ElapsedMilliseconds)}elseif($Network -eq 'tor'){30000}else{8000})
             Assert-SplitNotCancelled $Root
             Set-SessionDns $Root
             Assert-SplitTunDns
@@ -310,6 +341,9 @@ function Start-SplitSession([string]$Root, [bool]$TunEnabled=$true) {
         }
         try { Restore-SessionDns $Root } catch { $rollback.Add('dns') }
         try { Stop-OwnedCore $Root } catch { $rollback.Add('core') }
+        if($Network -in @('tor','i2p') -and (Get-Command Stop-SplitTor -ErrorAction SilentlyContinue)){
+            try {Stop-SplitTor} catch {$rollback.Add('tor')}
+        }
         # The process was created by this call, so it remains owned even when
         # registering the session failed. Cleanup errors must not replace the
         # original startup ErrorRecord or prevent the remaining cleanup steps.
@@ -327,11 +361,11 @@ function Start-SplitSession([string]$Root, [bool]$TunEnabled=$true) {
 function Stop-SplitSession([string]$Root, [switch]$ReleaseGuard) {
     $dnsFailure=$null
     try { Restore-SessionDns $Root } catch { $dnsFailure=$_ }
-    finally { Stop-OwnedCore $Root }
+    finally { try {Stop-OwnedCore $Root} finally {if(Get-Command Stop-SplitTor -ErrorAction SilentlyContinue){Stop-SplitTor}} }
     if ($dnsFailure) { throw $dnsFailure }
     # Automatic recovery/reconnect retain protection. Explicit disconnect is
     # allowed to release it only after DNS recovery and owned-core shutdown.
-    if ($ReleaseGuard) {Disable-SplitTrafficGuard $Root}
+    if ($ReleaseGuard) {Disable-SplitTrafficGuard $Root;[IO.File]::Delete((Join-Path $Root 'private\tor-mode'))}
 }
 
 function Write-SplitDiagnostics([string]$Root) {
@@ -378,6 +412,12 @@ function Get-SplitStatus([string]$Root) {
     }
     $starting=$false
     if ($p) { $starting=(Read-JsonFile (Join-Path $Root 'runtime\session.json')).phase -eq 'starting' }
+    if($p){
+        $liveSession=Read-JsonFile (Join-Path $Root 'runtime\session.json')
+        if($liveSession.ContainsKey('transport') -and $liveSession.transport.ContainsKey('network') -and $liveSession.transport.network -in @('tor','i2p')){
+            if(!(Get-Command Test-SplitTor -ErrorAction SilentlyContinue) -or !(Test-SplitTor)){$p=$null;$starting=$false}
+        }
+    }
     $guard=Get-SplitTrafficGuardStatus $Root
     if (!$p -or $starting) {
         # Persistent filters can remain verified after the tunnel process stops.

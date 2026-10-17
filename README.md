@@ -1,19 +1,23 @@
 <p align="center">
+
+
   <img src="assets/github-banner.svg" alt="Mukhomor — VPN для сайтов, прямое соединение для игр" width="100%">
 </p>
 
+**P2P** в 0.8.8 (в проверке): выбор Tor или внутренней сети I2P без аккаунта и оплаты. Tor поддерживает прямое подключение, obfs4, WebTunnel и готовые пресеты Snowflake CDN77 / AMP. На первом запуске выбран Snowflake CDN77; сохранённые настройки не меняются. Настройки содержат ссылки Tor Project для получения свежих мостов; аккаунт Tor не нужен. I2P открывает только `.i2p`; обычный интернет в этом режиме блокируется. UDP приложений блокируется в обоих режимах. Ограничения, исследованные сети и статус проверок: [docs/p2p.md](docs/p2p.md).
+
 <p align="center">
-  <a href="https://github.com/0nionow1/Mukhomor/releases/tag/v0.8.2"><img src="https://img.shields.io/github/v/release/0nionow1/Mukhomor?style=flat-square&color=FF52B9&label=release" alt="Последний релиз"></a>
+  <a href="https://github.com/Mukhomo/Mukhomor/releases/tag/v0.8.8"><img src="https://img.shields.io/github/v/release/Mukhomo/Mukhomor?style=flat-square&color=FF52B9&label=release" alt="Последний релиз"></a>
   <img src="https://img.shields.io/badge/Windows-10%20%2F%2011%20x64-16F5D1?style=flat-square" alt="Windows 10/11 x64">
   <img src="https://img.shields.io/badge/Linux-x64-16F5D1?style=flat-square" alt="Linux x64">
   <img src="https://img.shields.io/badge/Android-8.0%2B-16F5D1?style=flat-square" alt="Android 8.0+">
-  <a href="https://github.com/0nionow1/Mukhomor/actions/workflows/ci.yml"><img src="https://github.com/0nionow1/Mukhomor/actions/workflows/ci.yml/badge.svg" alt="Проверки"></a>
+  <a href="https://github.com/Mukhomo/Mukhomor/actions/workflows/ci.yml"><img src="https://github.com/Mukhomo/Mukhomor/actions/workflows/ci.yml/badge.svg" alt="Проверки"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/own%20code-MIT-919AB0?style=flat-square" alt="Собственный код: MIT"></a>
   <img src="https://img.shields.io/badge/mihomo-v1.19.32-919AB0?style=flat-square" alt="Ядро mihomo v1.19.32">
 </p>
 
 <p align="center">
-  <a href="https://github.com/0nionow1/Mukhomor/releases/tag/v0.8.2"><b>Скачать для Windows, Linux и Android</b></a> ·
+  <a href="https://github.com/Mukhomo/Mukhomor/releases/tag/v0.8.8"><b>Скачать для Windows, Linux и Android</b></a> ·
   <a href="docs/README.md">Документация</a> ·
   <a href="docs/vps-and-vpn.md">Свой VPS и VPN</a> ·
   <a href="CHANGELOG.md">Что нового</a> ·
@@ -29,7 +33,11 @@ Mukhomor — открытый клиент для Windows, Linux и Android дл
 
 В основе — [mihomo от MetaCubeX](https://github.com/MetaCubeX/mihomo/tree/v1.19.32). Mukhomor добавляет нативный интерфейс, локальный импорт серверов, готовые игровые исключения и управление установкой, подключением и восстановлением DNS. Сетевые протоколы реализует mihomo; это независимый проект.
 
-<p align="center"><img src="assets/preview.png" alt="Mukhomor 0.8.1: тема Неон, подключение и тестовые серверы" width="360"></p>
+<p align="center"><img src="assets/preview.png" alt="Разрабатываемый Mukhomor: тема Неон, подключение и тестовые серверы" width="360"></p>
+
+## Новое в 0.8.8
+
+Tor и I2P во вкладке P2P, мосты и пресеты Snowflake, пояснения подключения, обновлённые гриб и навигация. Выпуск находится в проверке; ограничения описаны в [документации платформ](docs/platforms.md). Для Linux требуется glibc 2.38+. После переименования аккаунта GitHub пользователям прежних выпусков может потребоваться ручная установка 0.8.8; дальнейшие обновления используют новый адрес.
 
 ## Что нового в 0.8.2
 
@@ -52,7 +60,7 @@ Mukhomor — открытый клиент для Windows, Linux и Android дл
 
 Также сохранены возможности предыдущего выпуска:
 
-- **20 тем и три размера интерфейса.** Неон по умолчанию, пиксельный мухомор и значки в цветах темы, анимированный фон.
+- **20 тем и три размера интерфейса.** Неон по умолчанию, проработанный пиксельный мухомор и отдельный мини-логотип в цветах темы, анимированный фон и расползающийся мицелий.
 - **Наборы для себя и друзей.** Отдельные страницы управления и редактирования, готовые шаблоны, импорт и экспорт JSON без серверных реквизитов.
 - **Больше готовых исключений.** 286 игровых процессов, 1 123 игровых доменных правила и 17 торрент-клиентов; офлайн-списки и обновление источников.
 - **Удобнее каждый день.** Независимый запуск с Windows, автоподключение последнего успешного сервера, меньше лишней работы при опросе статуса и сохранении настроек.
@@ -80,7 +88,7 @@ Mukhomor использует Rust и Slint с программной отрис
 
 ## Запуск за несколько минут
 
-В **0.8.2** доступно **Настройки → Проверить обновления → Обновить приложение** для Windows, Linux и Android. Пакет проверяется по SHA-256, профили и настройки сохраняются. Перед установкой отключите VPN и сохраните изменения; система запросит необходимые разрешения (`pkexec` на Linux).
+В **0.8.8** доступно **Настройки → Проверить обновления → Обновить приложение** для Windows, Linux и Android. Пакет проверяется по SHA-256, профили и настройки сохраняются. Перед установкой отключите VPN и сохраните изменения; система запросит необходимые разрешения (`pkexec` на Linux).
 
 | Платформа | Файл и установка |
 | --- | --- |
@@ -90,7 +98,7 @@ Mukhomor использует Rust и Slint с программной отрис
 
 [Требования и ограничения платформ](docs/platforms.md). Шаги для Windows:
 
-1. Скачайте **`Mukhomor-X.Y.Z-windows-x64.zip`** из [последнего релиза](https://github.com/0nionow1/Mukhomor/releases/tag/v0.8.2).
+1. Скачайте **`Mukhomor-X.Y.Z-windows-x64.zip`** из [последнего релиза](https://github.com/Mukhomo/Mukhomor/releases/tag/v0.8.8).
 2. Распакуйте **весь архив** и запустите **`Mukhomor/mukhomor.exe`**. Подтвердите запрос Windows при первой установке.
 3. Нажмите **Добавить конфигурацию** и выберите свой файл или вставьте серверную ссылку/текст.
 4. Выберите сервер и нажмите **Подключиться**. При необходимости добавьте `.exe` игры на странице **Правила** и сохраните.
@@ -148,7 +156,7 @@ flowchart LR
 | [Свой VPS и VPN](docs/vps-and-vpn.md) | [Как внести изменение](CONTRIBUTING.md) |
 | [Решение проблем](docs/troubleshooting.md) | [Безопасность](SECURITY.md) |
 
-Ошибки и предложения: [Issues](https://github.com/0nionow1/Mukhomor/issues). Не прикладывайте рабочие VPN-профили, ключи или ссылки подписок.
+Ошибки и предложения: [Issues](https://github.com/Mukhomo/Mukhomor/issues). Не прикладывайте рабочие VPN-профили, ключи или ссылки подписок.
 
 ## Основа и благодарности
 

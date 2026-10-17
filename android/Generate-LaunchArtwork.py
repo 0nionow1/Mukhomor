@@ -1,7 +1,7 @@
 """Bake the Android system splash from the application's shared pixel artwork.
 
 Only Python's standard library is needed. Generated resources live in target/;
-the source of the silhouette and colors remains mushroom.rs and theme.json.
+the silhouette and tones come from mushroom-art.json and theme.json, as in Slint.
 """
 import argparse
 import copy
@@ -35,22 +35,19 @@ def generate(output):
     rgb = lambda key: tuple(bytes.fromhex(theme[key][1:]))
     bg, primary, secondary, stem = map(rgb, ("background", "indigo", "teal", "logo_stem"))
     white = (255, 255, 255)
-    # Same palette as mushroom::palette for the default Neon theme.
-    palette = dict(zip("RHEDWVQSLABMNJ", (
-        primary, mix(primary, white, 24), mix(primary, bg, 16), mix(primary, bg, 30),
-        secondary, mix(secondary, white, 16), mix(secondary, primary, 15), stem,
-        mix(stem, white, 60), mix(stem, bg, 21), mix(stem, bg, 12),
-        mix(secondary, stem, 46), mix(secondary, bg, 35), mix(secondary, stem, 70),
-    )))
-    source = (ROOT / "native/src/mushroom.rs").read_text(encoding="utf-8")
-    hero = source.split("pub const HERO:", 1)[1].split("= [", 1)[1].split("];", 1)[0]
-    rows = re.findall(r'b"([.A-Z]+)"', hero)
+    artwork = json.loads((ROOT / "assets/mushroom-art.json").read_text(encoding="utf-8"))
+    def retint(reference, base, themed):
+        return tuple((t*r+b//2)//max(1,b) if r <= b else
+                     t+((255-t)*(r-b)+(255-b)//2)//max(1,255-b)
+                     for r,b,t in zip(reference,base,themed))
+    bases = ((255,82,185),(22,245,209),(243,255,244))
+    palette = {14+i: retint(c["rgb"],bases[c["family"]],(primary,secondary,stem)[c["family"]])
+               for i,c in enumerate(artwork["colors"])}
+    rows, tones, spots = artwork["hero"]["rows"], artwork["hero"]["tones"], artwork["spots"]
     if len(rows) != 72 or any(len(row) != 80 for row in rows):
         raise ValueError("Shared HERO dimensions changed; review splash framing")
-    if set("".join(rows)) - set(palette) - {"."}:
-        raise ValueError("Unknown shared artwork palette entry")
-    spots_source = source.split("pub const HERO_SPOTS:", 1)[1].split("=", 1)[1].split(";", 1)[0]
-    spots = [tuple(map(int, match)) for match in re.findall(r"\((\d+),\s*(\d+),\s*(\d+),\s*(\d+)\)", spots_source)]
+    if any(tones[y][x] not in palette for y,row in enumerate(rows) for x,glyph in enumerate(row) if glyph != "."):
+        raise ValueError("Unknown shared artwork tone entry")
     if len(spots) != 3:
         raise ValueError("Shared spot animation regions changed")
 
@@ -87,9 +84,9 @@ def generate(output):
                     continue
                 group = "root" + str(min(5, distance[y, x] * 6 // (longest + 1)))
             elif glyph in "WVQ":
-                group = "spot" + str(next(i for i, (left, top, w, h) in enumerate(spots)
-                                          if left <= x < left + w and top <= y < top + h))
-            paths[group, glyph].append(f"M{x},{y}h1v1h-1z")
+                group = "spot" + str(min(range(len(spots)), key=lambda i:
+                    abs(x*2-spots[i][0]*2-spots[i][2])+abs(y*2-spots[i][1]*2-spots[i][3])))
+            paths[group, tones[y][x]].append(f"M{x},{y}h1v1h-1z")
 
     vector = element("vector", width="288dp", height="288dp", viewportWidth=108, viewportHeight=108)
     # All 80x72 pixels fit inside Android's central 72dp safe circle.
@@ -109,7 +106,7 @@ def generate(output):
 
     color = lambda c: "#" + "".join(f"{v:02X}" for v in c)
     for (group, glyph), commands in sorted(paths.items()):
-        name = group + "_" + glyph
+        name = group + "_" + str(glyph)
         attributes = dict(name=name, fillColor=color(palette[glyph]), pathData="".join(commands))
         if group.startswith("root"):
             attributes["fillAlpha"] = "0"

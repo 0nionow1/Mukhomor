@@ -30,7 +30,8 @@ use windows_sys::Win32::{
 const MAX: usize = 4 * 1024 * 1024;
 const MAX_BRIDGE_FRAME: usize = MAX;
 const RPC_TIMEOUT: Duration = Duration::from_secs(100);
-const ACTIONS: [&str; 12] = [
+const ACTIONS: [&str; 13] = [
+    "ConfigureTor",
     "Import",
     "Select",
     "Rename",
@@ -341,7 +342,7 @@ fn receive(handle: HANDLE, deadline: Instant) -> Result<Value, String> {
 }
 pub fn rpc(root: &Path, request: &Value) -> Result<Value, String> {
     let deadline = Instant::now()
-        + if request["action"] == "Status" {
+        + if request["action"] == "Connect" && mukhomor_ui::state::is_p2p(&request["network"]) { Duration::from_secs(610) } else if request["action"] == "Status" {
             Duration::from_secs(5)
         } else {
             RPC_TIMEOUT
@@ -462,7 +463,7 @@ fn save_intent(root: &Path, intent: &ConnectionIntent) -> Result<(), String> {
     let path = root.join("runtime/connection-intent.json");
     let pending = root.join("runtime/connection-intent.json.pending");
     let bytes = serde_json::to_vec(
-        &json!({"schema":1,"generation":intent.generation,"desired":intent.desired}),
+        &json!({"schema":1,"generation":intent.generation,"desired":intent.desired && !root.join("private/tor-mode").exists()}),
     )
     .map_err(|e| e.to_string())?;
     write_atomic_state(&path, &pending, &bytes).map_err(|_| {
@@ -498,6 +499,7 @@ fn write_atomic_state(path: &Path, pending: &Path, bytes: &[u8]) -> std::io::Res
 }
 
 fn startup_target(data: &Value) -> Option<&str> {
+    if mukhomor_ui::state::is_p2p(&data["network"]) { return None; }
     let id = data
         .get("last_connected")
         .unwrap_or(&data["selected"])
@@ -518,6 +520,7 @@ fn remember_connection(
     if !current.desired || current.generation != generation || data["running"] != true {
         return Ok(());
     }
+    if mukhomor_ui::state::is_p2p(&data["network"]) { return Ok(()); }
     let error =
         "Не удалось запомнить последний подключённый сервер. Проверь доступ к данным Mukhomor.";
     let id = data["selected"]
@@ -663,6 +666,8 @@ fn decorate(data: &mut Value, intent: &ConnectionIntent, operation: &str) {
             && data["traffic_guard"]["protected"] != true
         {
             "recovery"
+        } else if mukhomor_ui::state::is_p2p(&data["network"]) && data["running"] != true {
+            "recovery"
         } else if data["running"] == true {
             "connected"
         } else if data["dns_recovery_pending"] == true {
@@ -676,6 +681,7 @@ fn decorate(data: &mut Value, intent: &ConnectionIntent, operation: &str) {
             || data["starting"] == true
             || data["dns_recovery_pending"] == true
             || data["traffic_guard"]["configured"] == true
+            || mukhomor_ui::state::is_p2p(&data["network"])
             || (intent.desired && ["Connect", "Select"].contains(&operation))
     );
 }
@@ -896,6 +902,11 @@ fn serve_client(
                     }
                     let mut generation = None;
                     let mut persistence_error = None;
+                    if action == "Connect" && mukhomor_ui::state::is_p2p(&data["network"]) && data["network"] != value["network"] {
+                        persistence_error = Some("Disconnect before changing the network".into());
+                    } else if action == "Connect" && mukhomor_ui::state::is_p2p(&value["network"]) && (data["running"] != true || data["network"] == value["network"]) {
+                        if std::fs::write(root.join("private/tor-mode"), value["network"].as_str().unwrap_or("tor").as_bytes()).is_err() { persistence_error = Some("Cannot save P2P connection policy".into()); }
+                    }
                     if ["Connect", "Disconnect", "Exit", "Select", "Update"].contains(&action) {
                         if ["Connect", "Disconnect", "Exit"].contains(&action)
                             && let Err(error) = admit_connection_intent(&root, &mut current, action)
@@ -923,6 +934,7 @@ fn serve_client(
                     data["request_id"] = json!(&request_id);
                     drop(data);
                     drop(current);
+                    let reply_seconds=if action == "Connect" && mukhomor_ui::state::is_p2p(&value["network"]) {605}else{95};
                     let (reply, rx) = mpsc::channel();
                     let _ = tx.send(Request {
                         value,
@@ -933,7 +945,7 @@ fn serve_client(
                         request_id,
                     });
                     platform::signal(wake);
-                    rx.recv_timeout(Duration::from_secs(95))
+                    rx.recv_timeout(Duration::from_secs(reply_seconds))
                         .unwrap_or(json!({"ok":false,"error":"Операция превысила время ожидания"}))
                 };
                 let _ = send(handle.0, &response, Instant::now() + Duration::from_secs(5));
@@ -1020,7 +1032,9 @@ impl Bridge {
     }
     fn limit(&self, action: &str) -> Duration {
         let seconds = match action {
-            "Connect" | "Select" | "Import" | "ApplySettings" | "ValidateSettings" => 60,
+            "Connect" if self.root.join("private/tor-mode").exists() => 600,
+            "Connect" => 60,
+            "Select" | "Import" | "ApplySettings" | "ValidateSettings" => 60,
             "Init" => 60,
             "Disconnect" | "Exit" | "Recover" => 20,
             "Snapshot" => 15,
@@ -1569,7 +1583,7 @@ fn startup_snapshot(bridge: &Bridge) -> Value {
         })
         .unwrap_or(json!({"dns_update":{"enabled":false}}));
     crate::presets::normalize(&mut settings);
-    json!({"profiles":profiles,"selected":index["selected"],"last_connected":index["last_connected"],"autoconnect":index["autoconnect"],"settings":settings,"running":false,"starting":false,"dns_recovery_pending":bridge.root.join("runtime/dns-backup.json").exists(),"traffic_guard":{"configured":bridge.root.join("private/traffic-guard-plan.json").exists(),"verified":false,"protected":false},"status_uncertain":true})
+    json!({"network":saved_p2p_network(&bridge.root),"profiles":profiles,"selected":index["selected"],"last_connected":index["last_connected"],"autoconnect":index["autoconnect"],"settings":settings,"running":false,"starting":false,"dns_recovery_pending":bridge.root.join("runtime/dns-backup.json").exists(),"traffic_guard":{"configured":bridge.root.join("private/traffic-guard-plan.json").exists(),"verified":false,"protected":false},"status_uncertain":true})
 }
 fn start_listener(
     root: PathBuf,
@@ -1837,6 +1851,7 @@ fn run_with_startup_mode(
             }
             let retry_generation = intent.lock().unwrap().generation;
             let mut value = json!({"action":"Connect"});
+            if root.join("private/tor-mode").exists() { value["network"] = json!(saved_p2p_network(&root)); }
             if let Some(id) = &boot_target {
                 value["id"] = json!(id);
             }
@@ -1960,7 +1975,9 @@ fn run_with_startup_mode(
             }
             let local_metadata = ["Rename", "Autoconnect"].contains(&action.as_str())
                 && cache.lock().unwrap()["status_uncertain"] != true;
-            let mut result = if local_metadata {
+            let mut result = if action == "Autoconnect" && request.value["enabled"] == true && root.join("private/tor-mode").exists() {
+                Err("Disconnect Tor before enabling autoconnect".into())
+            } else if local_metadata {
                 let snapshot = cache.lock().unwrap().clone();
                 profile_store::call(&root, &request.value, snapshot)
             } else {
@@ -2055,7 +2072,7 @@ fn run_with_startup_mode(
         }
         let dns = {
             let current = cache.lock().unwrap();
-            current["settings"]["dns_update"]["enabled"] == true
+            !mukhomor_ui::state::is_p2p(&current["network"]) && current["settings"]["dns_update"]["enabled"] == true
                 && current["settings"]["routing"]["mode"] != "full"
                 && core.is_some()
         };
@@ -2102,6 +2119,19 @@ fn run_with_startup_mode(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn failed_tor_bootstrap_keeps_an_explicit_disconnect_action() {
+        for network in ["tor", "i2p"] {
+        let mut data=json!({"network":network,"running":false,"traffic_guard":{"configured":false,"protected":false}});
+        decorate(&mut data,&ConnectionIntent::default(),"");
+        assert_eq!(data["phase"],"recovery");
+        assert_eq!(data["can_disconnect"],true);
+        data["network"]=json!("vps");
+        decorate(&mut data,&ConnectionIntent::default(),"");
+        assert_eq!(data["phase"],"idle");
+        assert_eq!(data["can_disconnect"],false);
+        }
+    }
     #[test]
     fn background_dns_cancellation_is_prompt_and_cannot_kill_foreground_children() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -2815,5 +2845,14 @@ Start-Sleep -Seconds 30
         );
         assert!(!read_intent(&tree.root).unwrap().unwrap().desired);
         assert!(permit_connect(&tree.root).is_err());
+    }
+}
+
+fn saved_p2p_network(root: &std::path::Path) -> &'static str {
+    let marker=root.join("private/tor-mode");
+    if !marker.exists() { return "vps"; }
+    match std::fs::read_to_string(marker).as_deref().map(str::trim) {
+        Ok("i2p") => "i2p",
+        _ => "tor", // Retain fail-closed recovery for old or damaged markers.
     }
 }

@@ -131,7 +131,13 @@ pub fn run(args: &[String], base: &Path) -> Result<(), String> {
         let plan = traffic_guard::Plan::parse(&value)?;
         // The request cannot authorize an arbitrary executable or physical NIC.
         let core = value["core_executable"].as_str().ok_or("WFP_PLAN_PATH")?;
-        let allowed = ["mihomo-mycelium.exe", "mihomo-windows-amd64-compatible.exe"];
+        let allowed: &[&str] = if matches!(value["transport"].as_str(),Some("tor-bridges"|"tor-snowflake")) {
+            &["mukhomor-pt.exe"]
+        } else if value["transport"] == "tor" {
+            &["mukhomor-tor.exe"]
+        } else {
+            &["mihomo-mycelium.exe", "mihomo-windows-amd64-compatible.exe"]
+        };
         if !allowed.iter().any(|n| {
             base.join("bin")
                 .join(n)

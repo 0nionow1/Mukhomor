@@ -4,6 +4,13 @@
   if (!scene) return;
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
   const paused = () => reduced.matches || document.body.classList.contains('motion-paused');
+  // Publish actual canvas growth, not a wall-clock approximation of its duration.
+  const rootsReady = ready => {
+    if (scene.dataset.rootsReady === String(ready)) return;
+    scene.dataset.rootsReady = String(ready);
+    scene.dispatchEvent(new CustomEvent('mukhomor-roots-ready', { detail: { ready } }));
+  };
+  rootsReady(false);
   const source = window.MukhomorScene;
   const fieldCanvas = document.querySelector('#living-field');
   const vignetteCanvas = document.querySelector('#scene-vignette');
@@ -74,9 +81,10 @@
     }
     source.rows.forEach((row, y) => [...row].forEach((glyph, x) => {
       const pathDistance = Number.isFinite(distance[y * 80 + x]) ? distance[y * 80 + x] : Math.hypot(x - 39, y - 47) + 10;
-      if (glyph !== '.') pieces.push({ x, y, glyph, rgb: source.colors[glyph], offset: (y * 80 + x) * 4, distance: pathDistance });
+      if (glyph !== '.') pieces.push({ x, y, glyph, rgb: source.toneColors[source.tones[y][x] - 14], offset: (y * 80 + x) * 4, distance: pathDistance });
     }));
     const longest = Math.max(...pieces.filter(p => p.y >= 48 && Number.isFinite(p.distance)).map(p => p.distance));
+    let rootGrowth = 0;
     draw = millis => {
       const position = (millis % 32000) / 32000 * source.frames;
       const a = Math.floor(position), b = (a + 1) % source.frames, blend = position - a;
@@ -89,9 +97,10 @@
       }
       fieldContext.putImageData(pixels, 0, 0);
       mushroom.data.fill(0);
-      const growth = paused() ? 1 : Math.min(1, Math.max(0, (millis - 250) / 2000));
+      // Once revealed, roots stay grown when motion is paused and resumed.
+      rootGrowth = Math.max(rootGrowth, paused() ? 1 : Math.min(1, Math.max(0, (millis - 250) / 2000)));
       for (const p of pieces) {
-        if (p.y >= 48 && p.distance > growth * (longest + 3)) continue;
+        if (p.y >= 48 && p.distance > rootGrowth * (longest + 3)) continue;
         let glow = 0;
         if ('WVQ'.includes(p.glyph)) glow = (.5 + .5 * Math.sin(millis * .0023 + p.x * .075)) * .34;
         if (p.y >= 48) glow = Math.max(0, Math.sin(millis * .0018 - p.distance * .18)) * .28;
@@ -99,11 +108,16 @@
         mushroom.data[p.offset + 3] = 255;
       }
       mushroomContext.putImageData(mushroom, 0, 0);
+      rootsReady(rootGrowth === 1);
     };
     document.querySelector('.scene-art-fallback').hidden = true;
     mushroomCanvas.hidden = false;
     document.body.classList.add('scene-ready');
     draw(paused() ? 2400 : 0);
+  } else {
+    const fallback = document.querySelector('.scene-art-fallback');
+    if (fallback.complete && fallback.naturalWidth) rootsReady(true);
+    else fallback.addEventListener('load', () => rootsReady(true), { once: true });
   }
   function tick(now) {
     frameId = 0;

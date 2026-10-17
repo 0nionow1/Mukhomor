@@ -23,6 +23,7 @@ $checked=0
 $required=@('TrafficGuard.psm1','native/src/cleanup_request.rs','native/src/setup_recovery.rs','native/src/traffic_guard.rs','native/src/traffic_guard_cli.rs','native/src/traffic_guard_tun.rs','tests/Set-OwnedTestRoot.ps1','tests/Test-PrivateAcl.ps1','tests/Test-Uninstall.ps1','tests/Test-ControllerRecovery.ps1','tests/Test-FullRouting.ps1','tests/Test-FullTrafficGuardLifecycle.ps1','tests/Test-NativeGuardRecovery.ps1')
 $required+=@('Slint-LICENSE.txt','native/src/desktop.rs','native/src/slint_host.rs','ui/Cargo.toml','ui/Cargo.lock','ui/build.rs','ui/src/lib.rs','ui/src/state.rs','ui/src/preview.rs','ui/src/visuals.rs','native/visual_build.rs','native/src/hero_motion.rs','ui/views/app.slint','ui/README.md')
 $required+=@('tests/Test-SlintStartup.ps1')
+$required+=@('native/src/mushroom_data.rs','assets/mushroom-art.json')
 $required+=@('native/src/app_update.rs','android/src/org/mukhomor/app/UpdateProvider.java')
 $required+=@('RuleNormalizer.cs','tests/Test-Performance.ps1')
 $required+=@('Build-All.ps1')
@@ -30,6 +31,10 @@ $required+=@('tests/Test-PortableReleasePrivacy.py')
 $required+=@('Build-Android.ps1','Build-Linux.sh','Prepare-PortableCore.py','Package-PortableSource.py','go.mod','go.sum','portable_assets.go','docs/platforms.md','tests/linux-network.py','native/src/lib.rs','native/src/portable.rs','native/src/android.rs','core/controller.go','core/controller_test.go','core/import.go','core/node_fields.go','core/openvpn.go','core/rules.go','core/storage.go','core/update.go','cmd/mukhomor-android/bridge.c','cmd/mukhomor-android/main.go','cmd/mukhomor-controller/main.go','android/AndroidManifest.xml','android/res/drawable/ic_mushroom.xml','android/src/org/mukhomor/app/MainActivity.java','android/src/org/mukhomor/app/MukhomorVpnService.java','android/src/org/mukhomor/app/NativeBridge.java','linux/install.sh','linux/mukhomor.desktop','linux/mukhomor.svg','linux/uninstall.sh')
 $required+=@('android/Generate-LaunchArtwork.py','android/res/drawable/ic_mushroom_monochrome.xml','android/res/drawable/ic_stat_mushroom.xml','android/res/drawable/startup_background.xml','android/res/mipmap-anydpi-v26/ic_launcher.xml','android/res/mipmap-anydpi-v33/ic_launcher.xml','android/res/values/colors.xml','android/res/values/styles.xml','android/res/values-v31/styles.xml')
 $required+=@('android/res/drawable/startup_wordmark.xml')
+$required+=@('tests/tor_fixture.py','Tor.psm1','Tor-LICENSE.txt','tor/Cargo.toml','tor/Cargo.lock','tor/src/main.rs','core/tor.go','core/tor_test.go','tests/Test-Tor.ps1','docs/tor.md')
+$required+=@('core/tor_guard_linux.go','core/tor_guard_other.go')
+$required+=@('native/src/tor_options.rs','tor/src/bridges.rs','tor/prepare.py','pt/go.mod','pt/go.sum','pt/main.go','pt/main_test.go','pt/underlay.go','pt/socket_windows.go','pt/socket_linux.go','pt/socket_android.go','pt/prepare.py','pt/licenses.py','pt/dependencies.sha256','pt/THIRD_PARTY_NOTICES.txt')
+$required+=@('i2p/main.cpp','i2p/CMakeLists.txt','i2p/prepare.py','i2p/build.py','i2p/windows-build.ps1','i2p/sources.py','i2p/THIRD_PARTY_NOTICES.txt','i2p/dependencies.sha256','pt/i2p.go','pt/i2p_test.go','pt/i2p_process_windows.go','pt/i2p_process_other.go','core/i2p_test.go','docs/p2p.md','pt/i2p-reseed/acetone_at_mail.i2p.crt','pt/i2p-reseed/admin_at_likogan.dev.crt','pt/i2p-reseed/admin_at_stormycloud.org.crt','pt/i2p-reseed/creativecowpat_at_mail.i2p.crt','pt/i2p-reseed/diyarciftci_at_protonmail.com.crt','pt/i2p-reseed/echelon3_at_mail.i2p.crt','pt/i2p-reseed/hankhill19580_at_gmail.com.crt','pt/i2p-reseed/i2p-reseed_at_mk16.de.crt','pt/i2p-reseed/igor_at_novg.net.crt','pt/i2p-reseed/lazygravy_at_mail.i2p.crt','pt/i2p-reseed/orignal_at_mail.i2p.crt','pt/i2p-reseed/r4sas-reseed_at_mail.i2p.crt','pt/i2p-reseed/rambler_at_mail.i2p.crt','pt/i2p-reseed/reseed_at_diva.exchange.crt','pt/i2p-reseed/sahil_at_mail.i2p.crt','pt/i2p-reseed/vserod1488_at_proton.me.crt')
 foreach($relative in $required){
     if($relative -notin $files){$issues.Add($relative+': required source excluded from publication')}
 }
@@ -37,6 +42,17 @@ foreach($relative in $files){
     if($packaged -and $relative -in @('Source/mycelium-build.json','Source/mihomo-mycelium-source.zip')){
         $build=[IO.File]::ReadAllText((Join-Path $package 'Source\mycelium-build.json'))|ConvertFrom-Json
         if($build.schema -ne 1 -or $build.protocol_version -ne 1 -or $build.base_version -ne '1.19.32' -or $build.source_sha256 -cnotmatch '^[a-f0-9]{64}$' -or (Get-FileHash -LiteralPath (Join-Path $package 'Source\mihomo-mycelium-source.zip')).Hash.ToLowerInvariant() -cne $build.source_sha256){$issues.Add($relative+': Mycelium source provenance mismatch')}
+        continue
+    }
+    if($packaged -and $relative -in @('Source/i2p-dependencies.zip','Source/pt-dependencies.zip')){
+        $folder=if($relative -like '*i2p-*'){'i2p'}else{'pt'}
+        $expected=([IO.File]::ReadAllText((Join-Path $package ($folder+'\dependencies.sha256'))) -split '\s+')[0]
+        if($expected -cnotmatch '^[a-f0-9]{64}$' -or (Get-FileHash -LiteralPath (Join-Path $package $relative)).Hash.ToLowerInvariant() -cne $expected){throw 'P2P dependency source checksum mismatch'}
+        continue
+    }
+    if($packaged -and $relative -eq 'Source/tor-dependencies.zip'){
+        $expected=([IO.File]::ReadAllText((Join-Path $package 'tor\dependencies.sha256')) -split '\s+')[0]
+        if($expected -cnotmatch '^[a-f0-9]{64}$' -or (Get-FileHash -LiteralPath (Join-Path $package $relative)).Hash.ToLowerInvariant() -cne $expected){throw 'Tor dependency source checksum mismatch'}
         continue
     }
     if($packaged -and $relative -eq 'Source/mihomo-v1.19.32-source.zip'){

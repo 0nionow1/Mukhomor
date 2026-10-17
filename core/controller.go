@@ -87,6 +87,11 @@ type Controller struct {
 	issues          []any
 	observedRunning bool
 	diagnostics     Object
+	tor             *torSession
+	torHelper       string
+	network         string
+	guard           torGuard
+	guardArmed      bool
 }
 
 func New(path, platform string, engine Engine) (*Controller, error) {
@@ -131,17 +136,35 @@ func New(path, platform string, engine Engine) (*Controller, error) {
 		store.Close()
 		return nil, err
 	}
+	guard := torGuard(noTorGuard{})
 	if engine == nil {
 		engine = &Mihomo{}
 		C.SetHomeDir(path)
+		if platform == "linux" {
+			guard = newTorGuard()
+		}
 	}
-	return &Controller{store: store, data: data, engine: engine, platform: platform, epoch: randomID(), issues: []any{}}, nil
+	armed, err := guard.present()
+	if err != nil {
+		store.Close()
+		return nil, err
+	}
+	c := &Controller{store: store, data: data, engine: engine, platform: platform, epoch: randomID(), issues: []any{}, guard: guard, guardArmed: armed}
+	if armed {
+		c.network = "tor"
+		if str(c.data["last_network"]) == "i2p" {
+			c.network = "i2p"
+		}
+		c.data["autoconnect"] = false
+	}
+	return c, nil
 }
 func (c *Controller) Close() {
 	c.cancel.Add(1)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	_ = c.engine.Stop()
+	c.tor.stop()
 	c.store.Close()
 }
 func (c *Controller) snapshot() Object {
@@ -151,11 +174,16 @@ func (c *Controller) snapshot() Object {
 		profiles = append(profiles, Object{"id": p["id"], "name": p["name"], "protocol": obj(p["node"])["type"]})
 	}
 	running := c.engine.Running()
+	torFailed := isP2P(c.network) && (c.tor == nil || !c.tor.alive.Load())
 	phase := "idle"
 	if running {
 		phase = "connected"
 	}
-	return Object{"profiles": profiles, "settings": c.data["settings"], "selected": c.data["selected"], "last_connected": c.data["last_connected"], "autoconnect": c.data["autoconnect"], "running": running, "phase": phase, "service_ready": true, "initializing": false, "busy": false, "can_disconnect": running, "traffic_guard": Object{"protected": false, "configured": false}, "last_operation": c.last, "rule_issues": c.issues, "rule_issues_total": len(c.issues), "version": assets.Version, "platform": c.platform, "diagnostics": c.diagnostics}
+	if torFailed {
+		phase = "recovery"
+		running = false
+	}
+	return Object{"last_network": c.data["last_network"], "network": c.network, "tor_available": true, "tor_options": c.torOptions(), "profiles": profiles, "settings": c.data["settings"], "selected": c.data["selected"], "last_connected": c.data["last_connected"], "autoconnect": c.data["autoconnect"], "running": running, "phase": phase, "service_ready": true, "initializing": false, "busy": false, "can_disconnect": c.engine.Running() || isP2P(c.network), "traffic_guard": Object{"protected": c.guardArmed && running, "configured": c.guardArmed}, "last_operation": c.last, "rule_issues": c.issues, "rule_issues_total": len(c.issues), "version": assets.Version, "platform": c.platform, "diagnostics": c.diagnostics}
 }
 func (c *Controller) Request(raw []byte, fd int) []byte {
 	fail := func(message string) []byte { b, _ := json.Marshal(Object{"ok": false, "error": message}); return b }
@@ -173,7 +201,7 @@ func (c *Controller) Request(raw []byte, fd int) []byte {
 	generation := c.cancel.Load()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if current := c.engine.Running(); current != c.observedRunning {
+	if current := c.engine.Running() && (c.tor == nil || c.tor.alive.Load()); current != c.observedRunning {
 		c.observedRunning = current
 		c.revision++
 	}
@@ -197,6 +225,9 @@ func (c *Controller) Request(raw []byte, fd int) []byte {
 		c.revision++
 		c.last = Object{"request_id": request["request_id"], "action": action, "ok": err == nil, "error": message}
 	}
+	// Record the state included in this response. A helper can fail before the
+	// first subsequent poll; that failure must invalidate a conditional Status.
+	c.observedRunning = c.engine.Running() && (c.tor == nil || c.tor.alive.Load())
 	b, e := json.Marshal(Object{"ok": err == nil, "error": message, "request_id": request["request_id"], "revision": fmt.Sprint(c.epoch, "-", c.revision), "data": c.snapshot()})
 	if e != nil {
 		return fail("Cannot encode controller state")
@@ -209,11 +240,95 @@ func (c *Controller) apply(r Object, fd int, generation uint64) error {
 		return nil
 	}
 	if action == "Disconnect" || action == "Exit" {
-		return c.engine.Stop()
+		err := c.engine.Stop()
+		c.tor.stop()
+		c.tor = nil
+		if err != nil {
+			return err
+		}
+		if err = c.guard.disarm(); err != nil {
+			return err
+		}
+		c.guardArmed = false
+		c.network = ""
+		return err
+	}
+	if isP2P(c.network) {
+		if action == "Select" || action == "ApplySettings" || action == "ConfigureTor" || (action == "Autoconnect" && r["enabled"] == true) {
+			return errors.New("Disconnect P2P before changing the connection policy")
+		}
+		if action == "Update" || action == "UpdateDns" {
+			return nil
+		}
 	}
 	if action == "Connect" {
+		if value, exists := r["network"]; exists {
+			network, ok := value.(string)
+			if !ok || (!isP2P(network) && network != "vps" && network != "") {
+				return errors.New("Unsupported network")
+			}
+		}
+		if isP2P(c.network) && !isP2P(str(r["network"])) {
+			return errors.New("Disconnect P2P before selecting a VPS")
+		}
+		if isP2P(c.network) && str(r["network"]) != c.network {
+			return errors.New("Disconnect before selecting another P2P network")
+		}
 		if c.engine.Running() {
+			if isP2P(c.network) && str(r["network"]) != c.network {
+				return errors.New("Disconnect before selecting another P2P network")
+			}
+			if isP2P(str(r["network"])) && !isP2P(c.network) {
+				return errors.New("Disconnect before selecting P2P")
+			}
+			if isP2P(c.network) && (c.tor == nil || !c.tor.alive.Load()) {
+				return errors.New("P2P transport stopped; disconnect before reconnecting")
+			}
 			return nil
+		}
+		if isP2P(str(r["network"])) {
+			// A stopped engine can still own a live helper. Never orphan it on retry.
+			c.tor.stop()
+			c.tor = nil
+			c.network = str(r["network"])
+			next := obj(clone(c.data))
+			next["autoconnect"] = false
+			next["last_network"] = c.network
+			if err := c.store.Write(next); err != nil {
+				return errors.New("Cannot save P2P connection policy")
+			}
+			c.data = next
+			c.network = str(r["network"])
+			if err := c.guard.arm(); err != nil {
+				return err
+			}
+			c.guardArmed, _ = c.guard.present()
+			transport, node, err := c.startTor(generation)
+			if err != nil {
+				return err
+			}
+			cfg, err := makeP2PConfig(c.network, node, obj(c.data["settings"]), c.platform, fd)
+			if err == nil && c.cancel.Load() != generation {
+				err = errors.New("Connection cancelled")
+			}
+			if err == nil {
+				err = c.engine.Start(cfg)
+			}
+			if err == nil && c.cancel.Load() != generation {
+				err = errors.New("Connection cancelled")
+				_ = c.engine.Stop()
+			}
+			if err != nil {
+				transport.stop()
+				return err
+			}
+			c.tor = transport
+			c.network = str(r["network"])
+
+			return nil
+		}
+		if str(r["network"]) != "" && str(r["network"]) != "vps" {
+			return errors.New("Unsupported network")
 		}
 		var node Object
 		target := c.data["selected"]
@@ -246,11 +361,13 @@ func (c *Controller) apply(r Object, fd int, generation uint64) error {
 		next := obj(clone(c.data))
 		next["selected"] = target
 		next["last_connected"] = next["selected"]
+		next["last_network"] = "vps"
 		if err = c.store.Write(next); err != nil {
 			_ = c.engine.Stop()
 			return errors.New("Cannot save successful connection")
 		}
 		c.data = next
+		c.network = "vps"
 		return nil
 	}
 	if action == "Diagnose" {
@@ -275,6 +392,12 @@ func (c *Controller) apply(r Object, fd int, generation uint64) error {
 	next := obj(clone(c.data))
 	profiles := array(next["profiles"])
 	switch action {
+	case "ConfigureTor":
+		options, err := c.validateTorOptions(r["tor_options"])
+		if err != nil {
+			return err
+		}
+		next["tor_options"] = options
 	case "Import":
 		nodes, err := Import(str(r["content"]), str(r["name"]))
 		if err != nil {

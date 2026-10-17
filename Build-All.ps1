@@ -28,7 +28,7 @@ function Run-Platform([string]$Name,[string]$Program,[string[]]$Arguments){
         if($code -ne 0){throw ($Name+' build failed ('+$code+')')}
     } catch { $failures.Add($_.Exception.Message) }
 }
-$windows=@('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',(Join-Path $root 'Build-Release.ps1'))
+$windows=@('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',(Join-Path $root 'Build-Release.ps1'),'-Python',$Python,'-Go',$Go)
 if($Offline){$windows+='-Offline'}
 Run-Platform 'Windows x64' 'powershell.exe' $windows
 $android=@('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',(Join-Path $root 'Build-Android.ps1'),'-Sdk',$Sdk,'-Ndk',$Ndk,'-Java',$Java,'-Go',$Go,'-Python',$Python)

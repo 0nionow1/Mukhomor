@@ -11,8 +11,8 @@ use std::{
     time::Duration,
 };
 
-const REPOSITORY: &str = "https://github.com/0nionow1/Mukhomor";
-const LATEST: &str = "https://api.github.com/repos/0nionow1/Mukhomor/releases/latest";
+const REPOSITORY: &str = "https://github.com/Mukhomo/Mukhomor";
+const LATEST: &str = "https://api.github.com/repos/Mukhomo/Mukhomor/releases/latest";
 const MAX_PACKAGE: u64 = 512 * 1024 * 1024;
 const MAX_EXPANDED: u64 = 1024 * 1024 * 1024;
 const INVALID: &str = "Некорректный пакет обновления";
@@ -178,10 +178,10 @@ fn allowed_url(url: &str) -> bool {
         && uri.port_u16().is_none_or(|port| port == 443)
         && uri.authority().is_some_and(|a| !a.as_str().contains('@'))
         && match uri.host() {
-            Some("api.github.com") => uri.path() == "/repos/0nionow1/Mukhomor/releases/latest",
+            Some("api.github.com") => uri.path() == "/repos/Mukhomo/Mukhomor/releases/latest",
             Some("github.com") => uri
                 .path()
-                .starts_with("/0nionow1/Mukhomor/releases/download/v"),
+                .starts_with("/Mukhomo/Mukhomor/releases/download/v"),
             Some("release-assets.githubusercontent.com") => {
                 uri.path().starts_with("/github-production-release-asset/")
             }
@@ -599,10 +599,10 @@ mod tests {
             "https://release-assets.githubusercontent.com/github-production-release-asset/1/file?token=test"
         ));
         for url in [
-            "http://github.com/0nionow1/Mukhomor/releases/download/v1/a",
-            "https://github.com.evil/0nionow1/Mukhomor/releases/download/v1/a",
-            "https://github.com:444/0nionow1/Mukhomor/releases/download/v1/a",
-            "https://user@github.com/0nionow1/Mukhomor/releases/download/v1/a",
+            "http://github.com/Mukhomo/Mukhomor/releases/download/v1/a",
+            "https://github.com.evil/Mukhomo/Mukhomor/releases/download/v1/a",
+            "https://github.com:444/Mukhomo/Mukhomor/releases/download/v1/a",
+            "https://user@github.com/Mukhomo/Mukhomor/releases/download/v1/a",
             "https://github.com/another/project/releases/download/v1/a",
             "https://127.0.0.1/a",
         ] {

@@ -9,6 +9,7 @@
   --frame-control-active: url('assets/pixel-frame-pink-compact.svg');
   --frame-secondary: url('assets/pixel-frame-panel-compact.svg');
   --frame-signal: url('assets/pixel-frame-signal-compact.svg');
+  --frame-pulse: url('assets/pixel-frame-pulse-compact.svg');
   --frame-pressed: url('assets/pixel-frame-pressed-compact.svg');
   --frame-edge-mask: url('assets/pixel-frame-edge-mask.svg');
   --mycelium-rule: url('assets/pixel-mycelium-rule.svg');
@@ -41,19 +42,37 @@
 
 /* Actions have the same root silhouette; outlines remain outside the frame. */
 .button, .enter-button {
+  --button-frame: var(--frame-action);
   border: 2px solid transparent;
-  border-image: var(--frame-action) 16 fill / 16px / 0 repeat;
+  border-image: var(--button-frame) 16 fill / 16px / 0 repeat;
   background: transparent;
   color: var(--ink);
   clip-path: none;
   box-shadow: none;
+  transform: none;
 }
-.button-secondary { border-image-source: var(--frame-secondary); }
-.button:not([aria-disabled="true"]):is(:hover, :focus-visible), .enter-button:is(:hover, :focus-visible) {
-  border-image-source: var(--frame-signal); background: transparent; color: var(--mint); filter: none;
+.button-secondary { --button-frame: var(--frame-secondary); }
+.button:not([aria-disabled="true"]):is(:hover, :focus-visible, :active), .enter-button:is(:hover, :focus-visible, :active) {
+  border-image-source: var(--button-frame); background: transparent; color: var(--ink); filter: none; transform: none;
 }
-.button:not([aria-disabled="true"]):active, .enter-button:active {
-  border-image-source: var(--frame-pressed); color: #10241f;
+/* An exact, transparent copy of the frame reveals only a moving root segment.
+   The surface, label and the remaining roots keep their resting colors. */
+@property --button-root-angle { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+.button::after, .enter-button::after {
+  content: ''; position: absolute; inset: -2px; pointer-events: none;
+  border: 2px solid transparent;
+  border-image: var(--frame-pulse) 16 / 16px / 0 repeat;
+  mask: conic-gradient(from var(--button-root-angle), transparent, #0003 12deg, #000 38deg 56deg, transparent 76deg);
+  opacity: 0;
+}
+.button:not([aria-disabled="true"]):is(:hover, :focus-visible, :active)::after,
+.enter-button:is(:hover, :focus-visible, :active)::after {
+  opacity: 1; animation: button-root-pulse 2.4s steps(90, end) infinite;
+}
+@keyframes button-root-pulse { to { --button-root-angle: 360deg; } }
+.motion-paused :is(.button, .enter-button)::after { animation: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  :is(.button, .enter-button)::after { animation: none !important; }
 }
 .analytics-actions .button-secondary:hover { background: transparent; }
 .release-file[aria-disabled="true"] { border-image-source: var(--frame-secondary); background: transparent; filter: none; }
@@ -183,6 +202,7 @@ td, th {
   .github-link { border: 0; border-image: none; }
 }
 @media (forced-colors: active) {
+  :is(.button, .enter-button)::after { display: none; }
   :is(.button, .enter-button, .routing-demo, .start-section, .code-block,
       .protocol-callout, .download-release, .preview-dialog, .analytics-consent,
       .analytics-challenge, .doc-callout, .status, .github-link, .copy-button,

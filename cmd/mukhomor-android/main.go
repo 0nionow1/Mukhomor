@@ -23,7 +23,7 @@ var initMu sync.Mutex
 var controller *core.Controller
 
 //export mukhomor_request
-func mukhomor_request(root *C.char, request *C.char, fd C.int) *C.char {
+func mukhomor_request(root *C.char, request *C.char, torPath *C.char, fd C.int) *C.char {
 	initMu.Lock()
 	if controller == nil {
 		dialer.DefaultSocketHook = func(_, _ string, conn syscall.RawConn) error {
@@ -44,6 +44,7 @@ func mukhomor_request(root *C.char, request *C.char, fd C.int) *C.char {
 			b, _ := json.Marshal(map[string]any{"ok": false, "error": err.Error()})
 			return C.CString(string(b))
 		}
+		controller.SetTorHelperPath(C.GoString(torPath))
 	}
 	c := controller
 	initMu.Unlock()

@@ -246,6 +246,36 @@ impl Locale {
         if self.effective() != Language::English {
             if let Some((_, russian)) = [
                 (
+                    "Disconnect the other VPN: its Windows rules interfere with Mukhomor protection.",
+                    "Отключите другой VPN: его правила Windows мешают защите Mukhomor.",
+                ),
+                ("Cannot start bundled Tor transport", "Не удалось запустить встроенный транспорт Tor."),
+                ("Bundled Tor transport is missing; reinstall Mukhomor", "Встроенный транспорт Tor не найден. Переустановите Mukhomor."),
+                ("No physical default route for Tor; disconnect other VPNs", "Не найдено обычное сетевое подключение для Tor. Отключите другие VPN."),
+                ("Tor could not bootstrap; this network may block Tor", "Не удалось подключиться к Tor. Возможно, эта сеть блокирует Tor."),
+                ("Tor bootstrap timed out; this network may block Tor", "Время подключения к Tor истекло. Возможно, эта сеть блокирует Tor."),
+                ("Tor transport initialization failed", "Не удалось подготовить подключение Tor."),
+                ("Cannot start bundled P2P transport", "Не удалось запустить встроенный транспорт P2P."),
+                ("Bundled P2P transport is missing; reinstall Mukhomor", "Встроенный транспорт P2P не найден. Переустановите Mukhomor."),
+                ("No physical default route for P2P", "Не найдено обычное сетевое подключение для P2P."),
+                ("P2P bootstrap failed; the selected network may be unavailable or blocked", "Не удалось подключиться. Выбранная сеть может быть недоступна или заблокирована."),
+                ("P2P bootstrap timed out; try another connector or Tor bridge", "Время подключения истекло. Попробуйте другую сеть или мост Tor."),
+                ("P2P transport initialization failed", "Не удалось подготовить подключение P2P."),
+                ("Disconnect P2P before changing the connection policy", "Отключите P2P перед изменением настроек подключения."),
+                ("Invalid Tor bridge configuration", "Проверьте тип и строки мостов Tor."),
+                ("Unsupported Tor connection method", "Этот способ подключения к Tor не поддерживается."),
+                ("Tor bridge list exceeds 8 KiB", "Список мостов Tor превышает 8 КиБ."),
+                ("This Tor method does not accept custom bridge lines", "Для этого способа подключения не нужны строки мостов."),
+                ("Invalid Tor bridge line", "Неверная строка моста Tor."),
+                ("Invalid Tor bridge address", "Неверный адрес моста Tor."),
+                ("Invalid Tor bridge option", "Неверный параметр моста Tor."),
+                ("Missing Tor bridge option", "В строке моста Tor отсутствует обязательный параметр."),
+                ("WebTunnel requires an HTTPS bridge URL", "Для WebTunnel нужен адрес моста с HTTPS."),
+                ("At most 16 Tor bridges are supported", "Можно добавить не более 16 мостов Tor."),
+                ("Add at least one Tor bridge", "Добавьте хотя бы один мост Tor."),
+                ("Tor bridge validation timed out", "Проверка мостов Tor не завершилась вовремя."),
+                ("Disconnect Tor before changing the connection policy", "Отключите Tor перед изменением его настроек."),
+                (
                     "Settings exceed 2 MiB; reduce rule list size. Your draft has been kept.",
                     "Общий размер настроек превышает 2 МиБ. Уменьши объём списков правил. Введённые данные сохранены в редакторе.",
                 ),
@@ -454,6 +484,36 @@ fn system_language(language_id: u16) -> Language {
 }
 
 const TEXT: &[(&str, &str)] = &[
+    ("СЕТИ", "NETWORKS"),
+    ("Интернет", "Internet"),
+    ("Только сеть I2P", "I2P network only"),
+    ("Только сайты и сервисы .i2p. Обычный интернет блокируется.", "Only .i2p sites and services. Regular internet is blocked."),
+    ("Адреса .b32.i2p проверяются ключом назначения.", ".b32.i2p addresses are verified against the destination key."),
+    ("Первое подключение I2P — до 8 минут.", "First I2P connection may take up to 8 minutes."),
+    ("Без мостов", "No bridges"),
+    ("Настройки Tor и мосты", "Tor settings and bridges"),
+    ("При блокировке Tor выберите Snowflake или свежие мосты WebTunnel / obfs4.", "If Tor is blocked, try Snowflake or fresh WebTunnel / obfs4 bridges."),
+    ("Готовый пресет: адреса и аккаунт не нужны. Если CDN77 недоступен, попробуйте AMP, и наоборот.", "Built-in preset: no addresses or account needed. If CDN77 fails, try AMP, and vice versa."),
+    ("Получите бесплатные мосты Tor Project и вставьте строки ниже. Аккаунт Tor не нужен.", "Get free bridges from Tor Project and paste the lines below. No Tor account needed."),
+    ("Сайт Tor", "Tor site"),
+    ("На сайте выберите тип моста и решите капчу. В Telegram: /obfs4 или /webtunnel. Вставьте одну строку на мост.", "Choose a bridge type and solve the website captcha. On Telegram: /obfs4 or /webtunnel. Paste one line per bridge."),
+    ("Прямое подключение к сети Tor.", "Connect directly to Tor."),
+    ("Встроенные мосты Snowflake. Адреса вводить не нужно.", "Built-in Snowflake bridges. No addresses needed."),
+    ("Вставьте мосты выбранного типа: одна строка на мост.", "Paste bridges of the selected type, one per line."),
+    ("Snowflake использует UDP только для связи с мостом.", "Snowflake uses UDP only to reach the bridge."),
+    ("Подключение AMP может занять до 8 минут.", "AMP may take up to 8 minutes to connect."),
+    ("При отказе моста прямое подключение не включается.", "A failed bridge never switches to a direct connection."),
+    ("Отключите другой VPN: его правила Windows мешают защите Mukhomor.", "Disconnect the other VPN: its Windows rules interfere with Mukhomor protection."),
+    ("Свой VPS", "Own VPS"),
+    ("Подписка", "Subscription"),
+    ("Бесплатная публичная сеть • без VPS", "Free public network • no VPS"),
+    ("Только TCP. UDP блокируется.", "TCP only. UDP is blocked."),
+    ("Выходной узел видит HTTP без шифрования. Используйте HTTPS.", "The exit node can read unencrypted HTTP. Use HTTPS."),
+    ("Tor не заменяет защиту Tor Browser.", "Tor does not replace Tor Browser protections."),
+    ("Первое подключение — до 6 минут.", "First connection may take up to 6 minutes."),
+    ("Tor · предварительная версия", "Tor · preview"),
+    ("Подписка Mukhomor", "Mukhomor subscription"),
+    ("В разработке", "In development"),
     ("Системные настройки VPN", "System VPN settings"),
     ("VPN продолжает работать в фоне. Отключить его можно здесь или в уведомлении.", "VPN stays connected in the background. Disconnect here or from the notification."),
     ("Системный трей недоступен. Закрытие окна отключает VPN и завершает приложение.", "System tray is unavailable. Closing the window disconnects VPN and exits the app."),
@@ -521,6 +581,36 @@ const TEXT: &[(&str, &str)] = &[
         "Save your changes and wait for the current operation to finish",
     ),
     ("Подключено", "Connected"),
+    ("Меняем сервер…", "Switching server…"),
+    ("Не удалось подключиться", "Connection failed"),
+    ("Подождите…", "Please wait…"),
+    ("Подготовка…", "Preparing…"),
+    ("Скоро", "Coming soon"),
+    ("Добавьте сервер", "Add a server"),
+    ("Проверяем связь. Статус VPN пока не подтверждён.", "Checking connection. VPN status is unconfirmed."),
+    ("Нажмите на гриб, чтобы восстановить сеть.", "Press the mushroom to restore the network."),
+    ("Возвращаем обычное подключение. Подождите.", "Restoring your normal connection. Please wait."),
+    ("Готовим приложение. Подождите.", "Preparing the app. Please wait."),
+    ("Вкладка не меняет VPN. Для смены типа отключитесь.", "Tabs do not switch VPN. Disconnect to change type."),
+    ("Переподключаем VPN к выбранному серверу.", "Reconnecting VPN to the selected server."),
+    ("Первый запуск Tor — до 6 минут. Можно отменить.", "First Tor connection: up to 6 min. You can cancel."),
+    ("Первый запуск I2P — до 8 минут. Можно отменить.", "First I2P connection: up to 8 min. You can cancel."),
+    ("Ждём ответа сервера. Можно отменить нажатием.", "Waiting for the server. Press to cancel."),
+    ("Сохраняем выбор. VPN пока не включён.", "Saving your selection. VPN is still off."),
+    ("Выполняем операцию. Дождитесь завершения.", "Operation in progress. Please wait."),
+    ("Работает только I2P. Для смены сети отключитесь.", "I2P only. Disconnect to change networks."),
+    ("Работает Tor. Для смены сети отключитесь.", "Tor is active. Disconnect to change networks."),
+    ("Выбор другого сервера переподключит VPN.", "Selecting another server will reconnect VPN."),
+    ("Для смены сервера сначала отключитесь.", "Disconnect before selecting another server."),
+    ("Нажмите на гриб, чтобы завершить подключение.", "Press the mushroom to close the connection."),
+    ("Подписка в разработке. Выберите VPS или P2P.", "Subscription is coming soon. Choose VPS or P2P."),
+    ("Управление VPN пока недоступно. Подождите.", "VPN controls are unavailable. Please wait."),
+    ("Проверьте сеть и настройки, затем повторите.", "Check your network and settings, then retry."),
+    ("Нажмите на гриб: только .i2p, без обычного интернета.", "Press the mushroom: .i2p only, no regular internet."),
+    ("Нажмите на гриб для подключения к Tor.", "Press the mushroom to connect to Tor."),
+    ("Добавьте конфигурацию кнопкой ниже.", "Add a configuration using the button below."),
+    ("Сервер выбран. Нажмите на гриб для подключения.", "Server selected. Press the mushroom to connect."),
+    ("Закрыть сообщение", "Dismiss message"),
     ("Не подключено", "Disconnected"),
     ("Подключаемся…", "Connecting…"),
     ("Загружаем состояние…", "Loading status…"),
@@ -1711,6 +1801,37 @@ mod tests {
             "The application path contains invalid characters or exceeds the Windows length limit."
         );
         assert_eq!(locale.error("Сервер добавлен"), "Server added");
+    }
+
+    #[test]
+    fn tor_errors_are_english_in_backend_and_localized_only_for_display() {
+        let mut locale = Locale {
+            design: crate::design::Design::default(),
+            preference: Language::English,
+            system: Language::Russian,
+            path: PathBuf::new(),
+            writer: None,
+        };
+        for source in [
+            "Cannot start bundled Tor transport",
+            "Bundled Tor transport is missing; reinstall Mukhomor",
+            "No physical default route for Tor; disconnect other VPNs",
+            "Tor could not bootstrap; this network may block Tor",
+            "Tor bootstrap timed out; this network may block Tor",
+            "Tor transport initialization failed",
+            "P2P transport initialization failed",
+            "Cannot start bundled P2P transport",
+            "P2P bootstrap timed out; try another connector or Tor bridge",
+            "P2P bootstrap failed; the selected network may be unavailable or blocked",
+            "Disconnect the other VPN: its Windows rules interfere with Mukhomor protection.",
+        ] {
+            let backend = serde_json::json!({"error":source});
+            locale.preference = Language::English;
+            assert_eq!(locale.error(source), source);
+            locale.preference = Language::Russian;
+            assert_ne!(locale.error(source), source);
+            assert_eq!(backend["error"], source);
+        }
     }
 
     #[test]

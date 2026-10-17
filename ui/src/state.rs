@@ -1,11 +1,18 @@
 //! Controller receipts and editable state, independent of the UI event loop.
 use serde_json::{Value, json};
 
+pub fn is_p2p(network: &Value) -> bool {
+    matches!(network.as_str(), Some("tor" | "i2p"))
+}
+
 #[derive(Clone, Debug)]
 pub struct Pending {
     pub id: String,
     pub action: String,
     pub generation: u64,
+    pub network: String,
+    pub profile_id: String,
+    pub reconnecting: bool,
     draft_version: u64,
 }
 
@@ -18,6 +25,7 @@ pub struct State {
     pub generation: u64,
     pub loaded: bool,
     pub transport_error: Option<String>,
+    pub connection_failed: bool,
     draft_version: u64,
     dirty: bool,
 }
@@ -70,14 +78,19 @@ impl State {
             || self.snapshot["running"] == true
             || self.snapshot["starting"] == true
             || self.snapshot["dns_recovery_pending"] == true
-            || self.pending.as_ref().is_some_and(|p| p.action == "Connect")
+            || self.pending.as_ref().is_some_and(|p| p.action == "Connect" || p.reconnecting)
     }
 
     pub fn phase(&self) -> &str {
+        // A lost receipt must not keep claiming an unconfirmed transition.
+        if self.loaded && (self.transport_error.is_some() || self.snapshot["status_uncertain"] == true) {
+            return "uncertain";
+        }
         if let Some(pending) = &self.pending {
             match pending.action.as_str() {
                 "Disconnect" | "Exit" => return "disconnecting",
                 "Connect" => return "connecting",
+                "Select" if pending.reconnecting => return "switching",
                 _ => {}
             }
         }
@@ -101,6 +114,29 @@ impl State {
 
     pub fn selected(&self) -> &str {
         self.snapshot["selected"].as_str().unwrap_or("")
+    }
+
+    pub fn connection_network(&self) -> &str {
+        self.pending.as_ref().filter(|p| p.action == "Connect")
+            .map(|p| p.network.as_str())
+            .unwrap_or_else(|| self.snapshot["network"].as_str().unwrap_or("vps"))
+    }
+
+    pub fn connection_name(&self) -> &str {
+        match self.connection_network() {
+            "tor" => return "Tor",
+            "i2p" => return "I2P",
+            _ => {}
+        }
+        let id = self.pending.as_ref()
+            .filter(|p| matches!(p.action.as_str(), "Connect" | "Select"))
+            .map(|p| p.profile_id.as_str())
+            .unwrap_or_else(|| if self.snapshot["running"] == true {
+                self.snapshot["last_connected"].as_str().filter(|s| !s.is_empty()).unwrap_or(self.selected())
+            } else { self.selected() });
+        self.snapshot["profiles"].as_array()
+            .and_then(|profiles| profiles.iter().find(|p| p["id"] == id))
+            .and_then(|p| p["name"].as_str()).unwrap_or("")
     }
 
     pub fn dirty(&self) -> bool {
@@ -140,9 +176,15 @@ impl State {
             return None;
         }
         self.generation += 1;
+        if matches!(action.as_str(), "Connect" | "Select" | "Disconnect" | "Exit") {
+            self.connection_failed = false;
+        }
         let id = format!("{nonce}-{}", self.generation);
         request["request_id"] = json!(id);
         self.pending = Some(Pending {
+            reconnecting: action == "Select" && self.snapshot["running"] == true,
+            network: request["network"].as_str().unwrap_or("vps").into(),
+            profile_id: request["id"].as_str().unwrap_or(self.selected()).into(),
             id,
             action,
             generation: self.generation,
@@ -248,6 +290,9 @@ impl State {
         }
         if let Some(completion) = completion {
             let pending = self.pending.take().unwrap();
+            if matches!(pending.action.as_str(), "Connect" | "Select") {
+                self.connection_failed = completion["ok"] != true;
+            }
             return Receipt::Completed {
                 action: pending.action,
                 ok: completion["ok"] == true,
@@ -263,6 +308,55 @@ mod tests {
     use super::*;
     fn snapshot(settings: Value) -> Value {
         json!({"ok":true,"revision":"epoch:1","data":{"profiles":[],"settings":settings,"service_ready":true}})
+    }
+
+    #[test]
+    fn pending_target_and_switching_survive_intermediate_snapshots() {
+        let mut s = State::default();
+        let mut reply = snapshot(json!({}));
+        reply["data"]["profiles"] = json!([{"id":"a","name":"Alpha"},{"id":"b","name":"Beta"}]);
+        reply["data"]["selected"] = json!("a");
+        reply["data"]["last_connected"] = json!("a");
+        reply["data"]["running"] = json!(true);
+        s.receive(0, "Status", Ok(reply.clone()));
+        s.begin(json!({"action":"Select","id":"b"}), "test").unwrap();
+        assert_eq!(s.phase(), "switching");
+        assert_eq!(s.connection_name(), "Beta");
+        reply["data"]["running"] = json!(false);
+        s.receive(s.generation, "Status", Ok(reply));
+        assert_eq!(s.phase(), "switching");
+        assert!(s.can_disconnect());
+        s.begin(json!({"action":"Disconnect"}), "test").unwrap();
+        assert_eq!(s.phase(), "disconnecting");
+    }
+
+    #[test]
+    fn connecting_p2p_uses_request_target_and_lost_receipt_is_uncertain() {
+        for network in ["tor", "i2p"] {
+            let mut s = State::default();
+            s.receive(0, "Status", Ok(snapshot(json!({}))));
+            s.begin(json!({"action":"Connect","network":network}), "test").unwrap();
+            assert_eq!(s.connection_network(), network);
+            assert_eq!(s.connection_name(), if network == "tor" { "Tor" } else { "I2P" });
+            assert_eq!(s.phase(), "connecting");
+            s.receive(s.generation, "Connect", Err("lost reply".into()));
+            assert_eq!(s.phase(), "uncertain");
+            assert!(s.can_disconnect());
+            assert!(s.pending.is_some());
+        }
+    }
+
+    #[test]
+    fn connection_failure_remains_visible_after_polling_until_retry() {
+        let mut s = State::default();
+        let reply = snapshot(json!({}));
+        s.receive(0, "Status", Ok(reply.clone()));
+        let request = s.begin(json!({"action":"Connect"}), "test").unwrap();
+        s.receive(s.generation, "Connect", Ok(json!({"ok":false,"request_id":request["request_id"],"error":"offline","data":reply["data"]})));
+        s.receive(s.generation, "Status", Ok(reply));
+        assert!(s.connection_failed);
+        s.begin(json!({"action":"Connect"}), "test").unwrap();
+        assert!(!s.connection_failed);
     }
 
     #[test]

@@ -10,6 +10,7 @@ mod design;
 mod desktop;
 #[cfg(windows)]
 mod i18n;
+mod tor_options;
 #[cfg(windows)]
 mod platform;
 #[cfg(windows)]

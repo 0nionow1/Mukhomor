@@ -21,12 +21,15 @@ const PROVIDER: GUID = GUID::from_u128(0xe0863c5b_3e6c_47da_83dd_bf8a89b90000);
 const SUBLAYER: GUID = GUID::from_u128(0xe0863c5b_3e6c_47da_83dd_bf8a89b90001);
 const FILTER_BASE: u128 = 0xe0863c5b_3e6c_47da_83dd_bf8a89b80000;
 const SUBLAYER_WEIGHT: u16 = 0xffff;
+// This is a requested priority, not a readback invariant. BFE assigns the
+// closest available sublayer weight (Microsoft: "Installing a Provider").
 // FWP_UINT8 encodes a BFE weight range, whose legal values are 0..=15.
 // Keep distinct ranges in the same security order as the rule priorities.
 // Microsoft: https://learn.microsoft.com/en-us/windows/win32/fwp/filter-weight-assignment
 const WEIGHT_DEFAULT_BLOCK: u8 = 1;
 const WEIGHT_PRIVATE_LAN: u8 = 6;
 const WEIGHT_LINK_CONTROL: u8 = 8;
+const WEIGHT_TOR_TRANSPORT: u8 = 9;
 const WEIGHT_PHYSICAL_DNS_BLOCK: u8 = 10;
 const WEIGHT_CORE_ENDPOINT: u8 = 12;
 const WEIGHT_TUNNEL: u8 = 14;
@@ -45,6 +48,8 @@ pub struct Plan {
     tunnel_luid: u64,
     endpoints: Vec<Endpoint>,
     allow_private_lan: bool,
+    tor: bool,
+    tor_transport: String,
 }
 
 impl Plan {
@@ -52,7 +57,8 @@ impl Plan {
     /// The caller must reject duplicate JSON keys before converting text to Value.
     pub fn parse(value: &Value) -> Result<Self, String> {
         let o = value.as_object().ok_or("WFP_PLAN_OBJECT")?;
-        if o.len() != 5
+        let tor = value["schema"] == 2 && matches!(value["transport"].as_str(),Some("tor"|"tor-bridges"|"tor-snowflake"));
+        if o.len() != (if tor { 6 } else { 5 })
             || o.keys().any(|k| {
                 !matches!(
                     k.as_str(),
@@ -61,12 +67,13 @@ impl Plan {
                         | "tunnel_luid"
                         | "endpoints"
                         | "allow_private_lan"
+                        | "transport"
                 )
             })
         {
             return Err("WFP_PLAN_FIELDS".into());
         }
-        if value["schema"].as_u64() != Some(1) {
+        if !tor && (value["schema"].as_u64() != Some(1) || o.contains_key("transport")) {
             return Err("WFP_PLAN_SCHEMA".into());
         }
         let path = value["core_executable"].as_str().ok_or("WFP_PLAN_PATH")?;
@@ -90,7 +97,7 @@ impl Plan {
         let tunnel_luid = value["tunnel_luid"].as_u64().ok_or("WFP_PLAN_LUID")?;
         let allow_private_lan = value["allow_private_lan"].as_bool().ok_or("WFP_PLAN_LAN")?;
         let rows = value["endpoints"].as_array().ok_or("WFP_PLAN_ENDPOINTS")?;
-        if rows.is_empty() || rows.len() > MAX_ENDPOINTS {
+        if (!tor && rows.is_empty()) || rows.len() > MAX_ENDPOINTS || (tor && (!rows.is_empty() || allow_private_lan)) {
             return Err("WFP_PLAN_ENDPOINT_COUNT".into());
         }
         let mut unique = BTreeSet::new();
@@ -137,13 +144,17 @@ impl Plan {
             tunnel_luid,
             endpoints: unique.into_iter().collect(),
             allow_private_lan,
+            tor,
+            tor_transport: if tor {value["transport"].as_str().unwrap().into()} else {String::new()},
         })
     }
     fn value(&self) -> Value {
-        json!({"schema":1,"core_executable":self.core_executable,"tunnel_luid":self.tunnel_luid,
+        let mut value = json!({"schema":1,"core_executable":self.core_executable,"tunnel_luid":self.tunnel_luid,
             "endpoints":self.endpoints.iter().map(|e| json!({"address":e.address.to_string(),
                 "port":e.port,"protocol":if e.protocol == 6 {"tcp"} else {"udp"}})).collect::<Vec<_>>(),
-            "allow_private_lan":self.allow_private_lan})
+            "allow_private_lan":self.allow_private_lan});
+        if self.tor { value["schema"] = json!(2); value["transport"] = json!(self.tor_transport); }
+        value
     }
     fn marker(&self) -> Vec<u8> {
         let mut bytes = MAGIC.to_vec();
@@ -301,6 +312,19 @@ fn rules(plan: &Plan) -> Vec<Rule> {
                 WEIGHT_TUNNEL,
                 vec![c(Field::Interface, Data::U64(plan.tunnel_luid))],
             );
+        }
+    }
+    if plan.tor {
+        // Dynamic Tor relays are permitted only for the installed helper as
+        // SYSTEM. Physical DNS blocks retain higher priority. Only Snowflake's
+        // own bridge adapter may use WebRTC UDP; user UDP is still blocked.
+        for layer in [Layer::Connect4, Layer::Connect6] {
+          for protocol in if plan.tor_transport=="tor-snowflake" { &[6u8,17][..] } else { &[6u8][..] } {
+            add(layer, true, WEIGHT_TOR_TRANSPORT, vec![
+                c(Field::App, Data::App), c(Field::User, Data::System),
+                c(Field::Protocol, Data::U8(*protocol)),
+            ]);
+          }
         }
     }
     for e in &plan.endpoints {
@@ -1202,7 +1226,7 @@ mod platform {
         })
     }
     // Identify the first rejected field without exporting its value. The exact
-    // comparisons remain fail-closed; no BFE normalization is assumed here.
+    // comparisons remain fail-closed, allowing only documented BFE bookkeeping.
     fn filter_mismatch(
         actual: &FWPM_FILTER0,
         rule: &Rule,
@@ -1210,11 +1234,12 @@ mod platform {
     ) -> Result<Option<&'static str>, String> {
         unsafe {
             // BFE marks stored boot filters disabled after initialization; runtime
-            // DISABLED is always a failure. No other extra flags are accepted.
+            // DISABLED is always a failure. INDEXED only accelerates lookup;
+            // BFE may add it automatically without changing the filter action.
             let flags = if rule.layer.boot() {
-                actual.flags & !FWPM_FILTER_FLAG_DISABLED
+                actual.flags & !(FWPM_FILTER_FLAG_DISABLED | FWPM_FILTER_FLAG_INDEXED)
             } else {
-                actual.flags
+                actual.flags & !FWPM_FILTER_FLAG_INDEXED
             };
             if !guid_eq(&actual.filterKey, &rule.key()) {
                 return Ok(Some("WFP_FILTER_MISMATCH_KEY"));
@@ -1321,9 +1346,11 @@ mod platform {
         engine: &Engine,
         expected: &[Rule],
         m: Option<&Materials>,
+        priority: Option<u16>,
     ) -> Result<Vec<GUID>, String> {
         let mut found = Vec::new();
         let mut total = 0usize;
+        let mut foreign_weights: Vec<(GUID, u16)> = Vec::new();
         // A non-NULL filter template requires an actual layer GUID. Enumerate
         // every BFE layer, not just policy layers: restricting the scan would
         // hide orphaned/foreign-shaped filters with our provider, key or sublayer.
@@ -1383,6 +1410,25 @@ mod platform {
                     let Some(rule) =
                         owned_filter_rule(&f.filterKey, &f.subLayerKey, provider, expected)?
                     else {
+                        if let Some(ours) = priority {
+                            if can_preempt_guard(f, expected) {
+                                let weight = if let Some((_, weight)) = foreign_weights.iter()
+                                    .find(|(key, _)| guid_eq(key, &f.subLayerKey)) {
+                                    *weight
+                                } else {
+                                    let mut raw = ptr::null_mut();
+                                    ok(unsafe { FwpmSubLayerGetByKey0(engine.0, &f.subLayerKey, &mut raw) }, "WFP_PRIORITY_READ")?;
+                                    let raw = WfpMem(raw);
+                                    if raw.0.is_null() { return Err("WFP_PRIORITY_INVALID".into()); }
+                                    let weight = unsafe { (*raw.0).weight };
+                                    foreign_weights.push((f.subLayerKey, weight));
+                                    weight
+                                };
+                                if weight >= ours {
+                                    return Err("WFP_HIGHER_PRIORITY_PERMIT".into());
+                                }
+                            }
+                        }
                         continue;
                     };
                     if found.iter().any(|k| guid_eq(k, &f.filterKey)) {
@@ -1408,7 +1454,26 @@ mod platform {
         }
         Ok(found)
     }
-    fn stored_plan(engine: &Engine) -> Result<Option<Plan>, String> {
+    // A foreign hard permit can prevent a lower sublayer's block from taking
+    // effect. Never declare protection just because BFE accepted a lower weight.
+    // A terminating/unknown callout can clear FWPS_RIGHT_ACTION_WRITE at run
+    // time, even without CLEAR_ACTION_RIGHT on its management-plane filter.
+    // Its eventual action cannot be proven safe from an FWPM_FILTER0 snapshot.
+    fn can_preempt_guard(filter: &FWPM_FILTER0, expected: &[Rule]) -> bool {
+        filter.flags & (FWPM_FILTER_FLAG_DISABLED | FWPM_FILTER_FLAG_BOOTTIME) == 0
+            && (matches!(filter.action.r#type,
+                FWP_ACTION_CALLOUT_TERMINATING | FWP_ACTION_CALLOUT_UNKNOWN)
+                || (filter.action.r#type == FWP_ACTION_PERMIT
+                    && filter.flags & FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT != 0))
+            && expected.iter().any(|r| !r.layer.boot() && guid_eq(&r.layer.key(), &filter.layerKey))
+    }
+    fn sublayer_matches(s: &FWPM_SUBLAYER0) -> Result<bool, String> {
+        Ok(guid_eq(&s.subLayerKey, &SUBLAYER)
+            && s.flags == FWPM_SUBLAYER_FLAG_PERSISTENT
+            && !s.providerKey.is_null()
+            && unsafe { guid_eq(&*s.providerKey, &PROVIDER) && blob_bytes(&s.providerData, 128)? == MAGIC })
+    }
+    fn stored_plan(engine: &Engine, check_priority: bool) -> Result<Option<Plan>, String> {
         let mut p = ptr::null_mut();
         let code = unsafe { FwpmProviderGetByKey0(engine.0, &PROVIDER, &mut p) };
         let p = WfpMem(p);
@@ -1419,7 +1484,7 @@ mod platform {
             if code != FWP_E_SUBLAYER_NOT_FOUND as u32 {
                 return Err("WFP_ORPHAN_SUBLAYER".into());
             }
-            own_filters(engine, &[], None)?;
+            own_filters(engine, &[], None, None)?;
             return Ok(None);
         }
         ok(code, "WFP_PROVIDER_READ")?;
@@ -1449,19 +1514,12 @@ mod platform {
             return Err("WFP_SUBLAYER_INVALID".into());
         }
         let s = unsafe { &*s.0 };
-        if !guid_eq(&s.subLayerKey, &SUBLAYER)
-            || s.flags != FWPM_SUBLAYER_FLAG_PERSISTENT
-            || s.weight != SUBLAYER_WEIGHT
-            || s.providerKey.is_null()
-            || unsafe {
-                !guid_eq(&*s.providerKey, &PROVIDER) || blob_bytes(&s.providerData, 128)? != MAGIC
-            }
-        {
+        if !sublayer_matches(s)? {
             return Err("WFP_SUBLAYER_MISMATCH".into());
         }
         verify_security(engine, &SUBLAYER, Object::Sublayer)?;
         let materials = Materials::new(&plan)?;
-        own_filters(engine, &rules(&plan), Some(&materials))?;
+        own_filters(engine, &rules(&plan), Some(&materials), check_priority.then_some(s.weight))?;
         Ok(Some(plan))
     }
     fn add_policy(engine: &Engine, plan: &Plan) -> Result<(), String> {
@@ -1523,12 +1581,12 @@ mod platform {
         // restricted to the service identity even though no object is mutated.
         require_system()?;
         let e = Engine::open()?;
-        let stored = transact(&e, true, || stored_plan(&e))?;
+        let stored = transact(&e, true, || stored_plan(&e, true))?;
         Ok(inspection_result(stored.as_ref()))
     }
     pub fn status(plan: &Plan) -> Result<Value, String> {
         let e = Engine::open()?;
-        let stored = transact(&e, true, || stored_plan(&e))?;
+        let stored = transact(&e, true, || stored_plan(&e, true))?;
         let matches = stored.as_ref() == Some(plan);
         Ok(
             json!({"schema":1,"action":"status","armed":stored.is_some(),"verified":matches,
@@ -1542,7 +1600,7 @@ mod platform {
         require_system()?;
         let e = Engine::open()?;
         transact(&e, false, || {
-            if let Some(old) = stored_plan(&e)? {
+            if let Some(old) = stored_plan(&e, false)? {
                 if old != *plan {
                     remove_policy(&e, &old)?;
                     add_policy(&e, plan)?;
@@ -1550,7 +1608,7 @@ mod platform {
             } else {
                 add_policy(&e, plan)?;
             }
-            if stored_plan(&e)?.as_ref() != Some(plan) {
+            if stored_plan(&e, true)?.as_ref() != Some(plan) {
                 return Err("WFP_PRECOMMIT_VERIFICATION".into());
             }
             Ok(())
@@ -1563,10 +1621,12 @@ mod platform {
         require_system()?;
         let e = Engine::open()?;
         transact(&e, false, || {
-            if let Some(old) = stored_plan(&e)? {
+            // Foreign conflicts must not prevent explicit recovery. Ownership,
+            // object ACLs and every own filter remain strictly verified.
+            if let Some(old) = stored_plan(&e, false)? {
                 remove_policy(&e, &old)?;
             }
-            if stored_plan(&e)?.is_some() {
+            if stored_plan(&e, false)?.is_some() {
                 return Err("WFP_DISARM_VERIFICATION".into());
             }
             Ok(())
@@ -1576,6 +1636,115 @@ mod platform {
     #[cfg(test)]
     mod memory_tests {
         use super::*;
+        #[test]
+        fn bfe_assigned_sublayer_weight_preserves_strict_identity() {
+            let mut provider = PROVIDER;
+            let base = FWPM_SUBLAYER0 {
+                subLayerKey: SUBLAYER, flags: FWPM_SUBLAYER_FLAG_PERSISTENT,
+                providerKey: &mut provider, providerData: blob(MAGIC), weight: 65532,
+                ..Default::default()
+            };
+            for weight in [0, 32768, 65532, 65535] {
+                assert!(sublayer_matches(&FWPM_SUBLAYER0 { weight, ..base }).unwrap());
+            }
+            assert!(!sublayer_matches(&FWPM_SUBLAYER0 { flags: 0, ..base }).unwrap());
+            assert!(!sublayer_matches(&FWPM_SUBLAYER0 { flags: 3, ..base }).unwrap());
+            assert!(!sublayer_matches(&FWPM_SUBLAYER0 { subLayerKey: PROVIDER, ..base }).unwrap());
+            assert!(!sublayer_matches(&FWPM_SUBLAYER0 { providerKey: ptr::null_mut(), ..base }).unwrap());
+            assert!(!sublayer_matches(&FWPM_SUBLAYER0 { providerData: blob(b"foreign"), ..base }).unwrap());
+            provider = SUBLAYER;
+            assert!(!sublayer_matches(&base).unwrap());
+            assert!(guid_eq(&provider, &SUBLAYER));
+        }
+        #[test]
+        fn foreign_hard_permits_cannot_silently_preempt_the_guard() {
+            let expected = rules(&Plan::parse(&super::super::tests::fixture()).unwrap());
+            let mut filter = FWPM_FILTER0 {
+                layerKey: FWPM_LAYER_ALE_AUTH_CONNECT_V4,
+                flags: FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT,
+                action: FWPM_ACTION0 { r#type: FWP_ACTION_PERMIT, ..Default::default() },
+                ..Default::default()
+            };
+            assert!(can_preempt_guard(&filter, &expected));
+            for action in [FWP_ACTION_CALLOUT_TERMINATING, FWP_ACTION_CALLOUT_UNKNOWN] {
+                filter.action.r#type = action;
+                filter.flags = FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT;
+                assert!(can_preempt_guard(&filter, &expected));
+                filter.flags = 0;
+                assert!(can_preempt_guard(&filter, &expected));
+                for excluded in [FWPM_FILTER_FLAG_DISABLED, FWPM_FILTER_FLAG_BOOTTIME] {
+                    filter.flags = excluded;
+                    assert!(!can_preempt_guard(&filter, &expected));
+                }
+            }
+            filter.flags = FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT;
+            filter.action.r#type = FWP_ACTION_BLOCK;
+            assert!(!can_preempt_guard(&filter, &expected));
+            filter.action.r#type = FWP_ACTION_CALLOUT_INSPECTION;
+            assert!(!can_preempt_guard(&filter, &expected));
+            filter.action.r#type = FWP_ACTION_PERMIT;
+            filter.flags = 0;
+            assert!(!can_preempt_guard(&filter, &expected));
+            for excluded in [FWPM_FILTER_FLAG_DISABLED, FWPM_FILTER_FLAG_BOOTTIME] {
+                filter.flags = FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT | excluded;
+                assert!(!can_preempt_guard(&filter, &expected));
+            }
+            filter.flags = FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT;
+            filter.layerKey = GUID::from_u128(0);
+            assert!(!can_preempt_guard(&filter, &expected));
+        }
+        #[test]
+        fn bfe_indexing_does_not_relax_action_or_disabled_checks() {
+            let plan = Plan::parse(&super::super::tests::fixture()).unwrap();
+            let materials = Materials::from_app_bytes(vec![1, 2, 3, 4]).unwrap();
+            for rule in rules(&plan) {
+                with_filter(&rule, &materials, |filter| {
+                    let mut indexed = *filter;
+                    indexed.flags |= FWPM_FILTER_FLAG_INDEXED;
+                    assert_eq!(filter_mismatch(&indexed, &rule, &materials)?, None);
+                    indexed.flags |= FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT;
+                    assert_eq!(filter_mismatch(&indexed, &rule, &materials)?, Some("WFP_FILTER_MISMATCH_FLAGS"));
+                    indexed.flags = filter.flags | FWPM_FILTER_FLAG_INDEXED | FWPM_FILTER_FLAG_DISABLED;
+                    assert_eq!(filter_mismatch(&indexed, &rule, &materials)?, if rule.layer.boot() { None } else { Some("WFP_FILTER_MISMATCH_FLAGS") });
+                    Ok(())
+                }).unwrap();
+            }
+        }
+        #[test]
+        #[ignore = "explicit SYSTEM-only BFE readback; transaction is always aborted, never activates filters"]
+        fn live_bfe_policy_readback_and_rollback() {
+            require_system().unwrap();
+            let engine = Engine::open().unwrap();
+            let tx = Transaction::begin(&engine, false).unwrap();
+            assert!(stored_plan(&engine, false).unwrap().is_none(), "Disconnect Mukhomor first");
+            let mut value = super::super::tests::fixture();
+            value["core_executable"] = json!(std::env::current_exe().unwrap().to_string_lossy());
+            for transport in ["vps", "tor", "tor-bridges", "tor-snowflake"] {
+                if transport!="vps" {
+                    value["schema"] = json!(2);
+                    value["transport"] = json!(transport);
+                    value["endpoints"] = json!([]);
+                    value["allow_private_lan"] = json!(false);
+                }
+                for luid in [0, 42] {
+                    value["tunnel_luid"] = json!(luid);
+                    let plan = Plan::parse(&value).unwrap();
+                    add_policy(&engine, &plan).unwrap();
+                    assert_eq!(stored_plan(&engine, false).unwrap(), Some(plan.clone()));
+                    match stored_plan(&engine, true) {
+                        Ok(actual) => { assert_eq!(actual, Some(plan)); println!("BFE priority: no overriding foreign permit"); }
+                        Err(error) => { assert_eq!(error, "WFP_HIGHER_PRIORITY_PERMIT"); println!("BFE priority: conflicting foreign permit correctly rejected"); }
+                    }
+                    // Recovery still verifies ownership and can remove only our policy.
+                    remove_policy(&engine, &stored_plan(&engine, false).unwrap().unwrap()).unwrap();
+                    assert!(stored_plan(&engine, false).unwrap().is_none());
+                    println!("BFE readback: transport={transport}, tunnel={}", luid != 0);
+                }
+            }
+            tx.abort().unwrap();
+            assert!(transact(&engine, true, || stored_plan(&engine, false)).unwrap().is_none());
+            println!("PASS: real BFE policy, strict readback, recovery and transaction rollback");
+        }
         #[test]
         fn flags_error_is_bounded_raw_and_preserves_strict_refusal() {
             let mut rule = Rule {
@@ -1901,9 +2070,39 @@ pub fn disarm() -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn tor_transport_is_tcp_only_and_below_physical_dns_blocks() {
+        let value = json!({"schema":2,"transport":"tor","core_executable":"C:\\Program Files\\Mukhomor\\bin\\mukhomor-tor.exe","tunnel_luid":0,"endpoints":[],"allow_private_lan":false});
+        let plan = Plan::parse(&value).unwrap();
+        assert_eq!(plan.value(), value);
+        let rs = rules(&plan);
+        let permits: Vec<_> = rs.iter().filter(|r| r.weight == WEIGHT_TOR_TRANSPORT).collect();
+        assert_eq!(permits.len(), 2);
+        for r in permits {
+            assert!(r.permit && r.weight < WEIGHT_PHYSICAL_DNS_BLOCK);
+            assert_eq!(r.conditions, vec![c(Field::App,Data::App),c(Field::User,Data::System),c(Field::Protocol,Data::U8(6))]);
+        }
+        let mut bad = value.clone();bad["allow_private_lan"] = json!(true);
+        assert!(Plan::parse(&bad).is_err());
+        bad = value;bad["endpoints"] = json!([{"address":"1.1.1.1","port":443,"protocol":"tcp"}]);
+        assert!(Plan::parse(&bad).is_err());
+    }
     pub(super) fn fixture() -> Value {
         json!({"schema":1,"core_executable":"C:\\Program Files\\Mukhomor\\bin\\mihomo.exe",
         "tunnel_luid":42,"endpoints":[{"address":"203.0.113.7","port":8444,"protocol":"tcp"}],"allow_private_lan":false})
+    }
+    #[test]
+    fn snowflake_udp_is_scoped_to_the_adapter_and_never_permits_dns_or_user_udp() {
+        for transport in ["tor-bridges","tor-snowflake"] {
+            let value=json!({"schema":2,"transport":transport,"core_executable":"C:\\Program Files\\Mukhomor\\bin\\mukhomor-pt.exe","tunnel_luid":0,"endpoints":[],"allow_private_lan":false});
+            let plan=Plan::parse(&value).unwrap();assert_eq!(plan.value(),value);let rs=rules(&plan);
+            for layer in [Layer::Connect4,Layer::Connect6] {
+                let mut f=internet(layer);f.protocol=17;f.remote_port=3478;
+                assert!(!allows(&rs,&f));f.app=true;assert!(!allows(&rs,&f));f.system=true;
+                assert_eq!(allows(&rs,&f),transport=="tor-snowflake");
+                for port in [53,853] {f.remote_port=port;assert!(!allows(&rs,&f));f.protocol=6;assert!(!allows(&rs,&f));}
+            }
+        }
     }
     #[test]
     fn filter_enumeration_requires_a_real_layer_and_includes_boot_and_disabled() {

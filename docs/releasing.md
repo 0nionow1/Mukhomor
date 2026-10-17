@@ -2,7 +2,7 @@
 
 ## Для пользователей
 
-Версии и скачивания находятся в [GitHub Releases](https://github.com/0nionow1/Mukhomor/releases). Для установки выберите Windows ZIP, Linux tar.gz или Android APK. Подробности: [установка и обновление](getting-started.md).
+Версии и скачивания находятся в [GitHub Releases](https://github.com/Mukhomo/Mukhomor/releases). Для установки выберите Windows ZIP, Linux tar.gz или Android APK. Подробности: [установка и обновление](getting-started.md).
 
 ## Нумерация
 
@@ -30,7 +30,7 @@ git tag -a v0.8.2 -m 'Mukhomor 0.8.2'
 git push origin v0.8.2
 ```
 
-4. Workflow [release.yml](https://github.com/0nionow1/Mukhomor/blob/main/.github/workflows/release.yml) проверит версию, соберёт Windows ZIP, Linux tar.gz, подписанный Android APK и соответствующие исходники, выполнит проверки публичных файлов и пакетов, загрузит десять файлов в **черновик** GitHub Release.
+4. Workflow [release.yml](https://github.com/Mukhomo/Mukhomor/blob/main/.github/workflows/release.yml) проверит версию, соберёт Windows ZIP, Linux tar.gz, подписанный Android APK и соответствующие исходники, выполнит проверки публичных файлов и пакетов, загрузит десять файлов в **черновик** GitHub Release.
 5. Откройте черновик в Releases, проверьте заметки, SHA256 и установку на тестовой машине, затем опубликуйте.
 
 Стандартная сборка Actions использует закреплённый mihomo. Проверенные локальные артефакты Mycelium не входят в Git: для выпуска с этим ядром собирайте пакеты локально и прикладывайте оба архива вместе с SHA256 и соответствующими исходниками. Не заменяйте их стандартной сборкой без проверки состава.

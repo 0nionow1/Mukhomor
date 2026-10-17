@@ -2,8 +2,8 @@
 // Browsers only interpolate tiny frames; the noise is computed once here.
 import { readFile, writeFile } from 'node:fs/promises';
 const theme = JSON.parse(await readFile(new URL('../../assets/theme.json', import.meta.url), 'utf8'));
-const source = await readFile(new URL('../../native/src/mushroom.rs', import.meta.url), 'utf8');
-const rows = [...source.match(/pub const HERO: [^=]+ = \[([\s\S]*?)\];/)[1].matchAll(/b"([.A-Z]+)"/g)].map(match => match[1]);
+import { artwork, toneColors } from './mushroom-art.mjs';
+const rows = artwork.hero.rows;
 const rgb = hex => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
 const blend = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
 const hash = (x, y, seed) => {
@@ -54,7 +54,7 @@ const palette = Array.from({ length: 256 }, (_, level) => {
 });
 const white = [255, 255, 255];
 const colors = { R: primary, H: blend(primary, white, .24), E: blend(primary, bg, .16), D: blend(primary, bg, .3), W: secondary, V: blend(secondary, white, .16), Q: blend(secondary, primary, .15), S: stem, L: blend(stem, white, .6), A: blend(stem, bg, .21), B: blend(stem, bg, .12), M: blend(secondary, stem, .46), N: blend(secondary, bg, .35), J: blend(secondary, stem, .7) };
-const scene = { width, height, frames, field: Buffer.from(data).toString('base64'), palette, rows, colors };
+const scene = { width, height, frames, field: Buffer.from(data).toString('base64'), palette, rows, colors, tones: artwork.hero.tones, toneColors };
 await writeFile(new URL('../public/assets/scene-data.js', import.meta.url), `// Baked from the application's pixel field and mushroom artwork.\nwindow.MukhomorScene = ${JSON.stringify(scene)};\n`);
 const groups = {};
 for (let y = 0; y < height; y++) for (let x = 0; x < width;) {

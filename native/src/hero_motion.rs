@@ -15,7 +15,7 @@ impl HeroPhase {
     fn read(phase: &str, error: bool) -> Self {
         match phase {
             "loading" => Self::Loading,
-            "connecting" => Self::Connecting,
+            "connecting" | "switching" => Self::Connecting,
             "connected" => Self::Connected,
             "disconnecting" => Self::Disconnecting,
             "recovery" => Self::Recovery,
@@ -195,4 +195,47 @@ impl MyceliumGrowth {
 fn mycelium_growth() -> &'static MyceliumGrowth {
     static GROWTH: std::sync::OnceLock<MyceliumGrowth> = std::sync::OnceLock::new();
     GROWTH.get_or_init(MyceliumGrowth::new)
+}
+
+#[cfg(test)]
+mod animation_regression_tests {
+    use super::*;
+
+    #[test]
+    fn original_mycelium_travel_and_reveal_sequence_are_unchanged() {
+        let growth = MyceliumGrowth::new();
+        let hash = growth.distance.iter().flatten().flat_map(|d| d.to_le_bytes())
+            .fold(0xcbf29ce484222325u64, |h,b| (h ^ u64::from(b)).wrapping_mul(0x100000001b3));
+        assert_eq!(hash, 0x8f5f6026e437e056);
+        assert_eq!(growth.longest, 3236);
+        for (amount, expected) in [(0,0),(100,2),(250,42),(500,109),(750,222),(1000,282)] {
+            let visible = (MYCELIUM_ROW..mushroom::HERO_HEIGHT)
+                .flat_map(|y| (0..mushroom::HERO_WIDTH).map(move |x| (y,x)))
+                .filter(|&(y,x)| growth.visible(y,x,amount)).count();
+            assert_eq!(visible,expected,"growth at {amount}");
+        }
+    }
+
+    #[test]
+    fn confirmation_completion_retraction_and_disabled_motion_are_preserved() {
+        let mut hero = HeroMotion::default();
+        hero.sync(HeroPhase::Connecting);
+        hero.advance(3600);
+        let pending = hero.roots(true);
+        assert_eq!(pending,800);
+        hero.advance(60_000);
+        assert!(hero.roots(true)<1000);
+        let before = hero.roots(true);
+        hero.sync(HeroPhase::Connected);
+        assert_eq!(hero.roots(true),before);
+        hero.advance(800);
+        assert_eq!(hero.roots(true),1000);
+        assert_eq!(hero.roots(false),1000);
+        hero.sync(HeroPhase::Disconnecting);
+        assert_eq!(hero.roots(true),1000);
+        hero.advance(700);
+        assert_eq!(hero.roots(true),0);
+        hero.sync(HeroPhase::Idle);
+        assert_eq!(hero.roots(false),0);
+    }
 }

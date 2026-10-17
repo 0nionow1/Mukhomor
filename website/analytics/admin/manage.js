@@ -53,7 +53,7 @@
       checkbox.addEventListener('change',()=>{release.visible=checkbox.checked;changed();recommendations();summary.textContent=`${release.version} · ${release.status==='stable'?'Stable':'В проверке'}${release.visible?'':' · скрыт'}`;});visible.append(checkbox,create('span','Показывать на сайте'));body.append(visible);
       body.append(create('p',`Опубликовано на GitHub: ${date(release.publishedAt)} МСК`,'muted'));
       const files=create('ul',undefined,'cms-file-list');for(const file of release.files)files.append(create('li',`${file.name} · ${(file.size/1048576).toFixed(1)} МБ`));body.append(files);
-      const source=create('a','Открыть выпуск на GitHub ↗','cms-link');source.href='https://github.com/0nionow1/Mukhomor/releases/tag/v'+encodeURIComponent(release.version);source.target='_blank';source.rel='noopener noreferrer';body.append(source);panel.append(body);$('release-edit-list').append(panel);
+      const source=create('a','Открыть выпуск на GitHub ↗','cms-link');source.href='https://github.com/Mukhomo/Mukhomor/releases/tag/v'+encodeURIComponent(release.version);source.target='_blank';source.rel='noopener noreferrer';body.append(source);panel.append(body);$('release-edit-list').append(panel);
     }
     recommendations();
   }

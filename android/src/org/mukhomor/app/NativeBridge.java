@@ -20,6 +20,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 public final class NativeBridge {
+    static boolean isP2P(String network){return "tor".equals(network)||"i2p".equals(network);}
     static { System.loadLibrary("mukhomor_core"); }
     static Context context;
     static volatile MukhomorVpnService service;
@@ -43,7 +44,14 @@ public final class NativeBridge {
         main.post(()->{try{context.startActivity(new Intent(android.provider.Settings.ACTION_VPN_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));}catch(Exception ignoredError){}});
         return "";
     }
-    private static native byte[] nativeRequest(byte[] root, byte[] request, int fd);
+    public static String bridgeWebsite(String url) {
+        if(!"https://bridges.torproject.org/".equals(url) && !"https://t.me/GetBridgesBot".equals(url)) return "Invalid bridge website";
+        try {
+            context.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            return "";
+        } catch(Exception e) { return "Cannot open the bridge website"; }
+    }
+    private static native byte[] nativeRequest(byte[] root, byte[] request, byte[] torPath, int fd);
     static native byte[] nativePackages();
 
     static synchronized void attach(MainActivity value) { context=value.getApplicationContext(); activity=new WeakReference<>(value); }
@@ -107,7 +115,7 @@ public final class NativeBridge {
         });
     }
     static String invoke(String request, int fd) {
-        byte[] result=nativeRequest(dataPath("").getBytes(StandardCharsets.UTF_8), request.getBytes(StandardCharsets.UTF_8), fd);
+        byte[] result=nativeRequest(dataPath("").getBytes(StandardCharsets.UTF_8), request.getBytes(StandardCharsets.UTF_8), new File(context.getApplicationInfo().nativeLibraryDir,"libmukhomor_tor.so").getAbsolutePath().getBytes(StandardCharsets.UTF_8), fd);
         if (result==null) return "{\"ok\":false,\"error\":\"Android native bridge failed\"}";
         return new String(result,StandardCharsets.UTF_8);
     }
@@ -147,8 +155,15 @@ public final class NativeBridge {
             if(ticket!=generation.get()) return failure(request,"Connection cancelled");
             CompletableFuture<String> result=MukhomorVpnService.enqueue(request,ticket);
             context.startForegroundService(new Intent(context,MukhomorVpnService.class).setAction("CONNECT"));
-            return result.get(45,TimeUnit.SECONDS);
+            return result.get(600,TimeUnit.SECONDS);
         } catch(Exception e) {
+            MukhomorVpnService retained=service;
+            if(retained!=null&&retained.holdsTorTunnel()){
+                // An RPC timeout or notification error is not user consent to
+                // release the blocking TUN. Explicit Disconnect still works.
+                retained.reportTorFailure();
+                return failure(request,"P2P operation failed; VPN tunnel retained until disconnect");
+            }
             generation.incrementAndGet();
             invoke("{\"action\":\"Disconnect\"}",-1);
             MukhomorVpnService s=service;if(s!=null)s.stopVpn();

@@ -55,10 +55,11 @@ def check_archive(archive):
         with zipfile.ZipFile(archive) as package:
             if package.testzip() is not None:
                 raise ValueError("APK integrity failure")
-            expected = {"lib/" + abi + "/" + lib for abi in ("arm64-v8a", "x86_64")
-                        for lib in ("libmukhomor_core.so", "libmukhomor_app.so")}
             libraries = {item.filename for item in package.infolist() if item.filename.endswith(".so")}
-            if not libraries or not libraries.issubset(expected):
+            abis = {name.split("/")[1] for name in libraries if name.startswith("lib/") and len(name.split("/")) == 3}
+            expected = {"lib/" + abi + "/" + lib for abi in abis
+                        for lib in ("libmukhomor_core.so", "libmukhomor_app.so", "libmukhomor_tor.so", "libmukhomor_pt.so", "libmukhomor_i2pd.so")}
+            if not abis or not abis.issubset({"arm64-v8a", "x86_64"}) or libraries != expected:
                 raise ValueError("Unexpected native library layout")
             for item in package.infolist():
                 check_name(item.filename)
@@ -71,10 +72,10 @@ def check_archive(archive):
                 check_name(item.name)
                 if item.issym() or item.islnk():
                     raise ValueError("Link in runtime package")
-                if item.isfile() and PurePosixPath(item.name).name in ("mukhomor", "mukhomor-controller"):
+                if item.isfile() and PurePosixPath(item.name).name in ("mukhomor", "mukhomor-controller", "mukhomor-tor", "mukhomor-pt", "mukhomor-i2pd"):
                     check_bytes(item.name, package.extractfile(item).read())
                     count += 1
-            if count != 2:
+            if count != 5:
                 raise ValueError("Missing Linux executables")
     print("PASS: portable release privacy; " + str(count) + " native binaries checked")
 
@@ -89,7 +90,7 @@ class PrivacyTests(unittest.TestCase):
                 for value in (prefix + b"private/config", b"/home/other/.cargo/registry/src/file.rs"):
                     with self.assertRaises(ValueError):
                         check_bytes(name, value)
-            for name in ("lib/arm64-v8a/libmukhomor_app.so", "package/mukhomor"):
+            for name in ("lib/arm64-v8a/libmukhomor_app.so", "lib/arm64-v8a/libmukhomor_tor.so", "package/mukhomor", "package/mukhomor-tor"):
                 with self.assertRaises(ValueError):
                     check_bytes(name, prefix + UPSTREAM_RUST_CACHES[0] + b"file.rs")
 

@@ -1,19 +1,25 @@
 <p align="center"><img src="assets/github-banner.svg" alt="Mukhomor — native VPN client with split routing" width="100%"></p>
 
+**P2P** in 0.8.8 (testing): choose Tor or the internal I2P network without an account or payment. Tor offers direct access, obfs4, WebTunnel and built-in Snowflake CDN77 / AMP presets. First use selects Snowflake CDN77; saved settings stay unchanged. Settings link to Tor Project for fresh bridges; no Tor account is needed. I2P opens only `.i2p`; regular Internet access is blocked in that mode. Application UDP is blocked in both modes. Limitations, candidate research and acceptance status: [docs/p2p.md](docs/p2p.md).
+
 # Mukhomor
 
-Version **0.8.2** uses a shared Slint interface. Windows, Linux and Android are required project platforms. See [platform builds, installation and validation](docs/platforms.md); choose the matching platform asset and check its release status.
+Version **0.8.8** uses a shared Slint interface. Windows, Linux and Android are required project platforms. See [platform builds, installation and validation](docs/platforms.md); choose the matching platform asset and check its release status.
 
 
 **A VPN for the services you choose. Direct routes for games.** Mukhomor is a native client for Windows, Linux and Android built around [mihomo v1.19.32](https://github.com/MetaCubeX/mihomo/tree/v1.19.32), with local profile import and configurable split routing. It is independent of MetaCubeX, WireGuard and Amnezia.
 
-[Русский](README.md) · [Download 0.8.2](https://github.com/0nionow1/Mukhomor/releases/tag/v0.8.2) · [Documentation](docs/README.md) · [Full changelog](CHANGELOG.md) · [Issues](https://github.com/0nionow1/Mukhomor/issues)
+[Русский](README.md) · [Download 0.8.8](https://github.com/Mukhomo/Mukhomor/releases/tag/v0.8.8) · [Documentation](docs/README.md) · [Full changelog](CHANGELOG.md) · [Issues](https://github.com/Mukhomo/Mukhomor/issues)
 
-<p align="center"><img src="assets/preview.png" alt="Mukhomor 0.8.1, Neon theme with synthetic demo servers" width="360"></p>
+<p align="center"><img src="assets/preview.png" alt="Mukhomor development UI, Neon theme with synthetic demo servers" width="360"></p>
 
 ## Current frontend
 
 Slint is the only UI in this branch. Use `Build-Release.ps1` to build it; previously published archives are not updated automatically. Use `Build-Linux.sh` and `Build-Android.ps1` for the Linux and Android packages. Platform requirements and the validation record are in [platforms.md](docs/platforms.md).
+
+## New in 0.8.8
+
+Tor and I2P in the P2P tab, bridges and Snowflake presets, connection guidance, and updated mushroom artwork and navigation. This release is under testing; see the [platform validation limits](docs/platforms.md). Linux requires glibc 2.38+. Following the GitHub account rename, previous releases may need one manual installation of 0.8.8; future update checks use the current repository.
 
 ## New in 0.8.2
 
@@ -28,7 +34,7 @@ Slint is the only UI in this branch. Use `Build-Release.ps1` to build it; previo
 
 ## Retained from previous releases
 
-- **Redesigned native UI:** 20 themes, Neon by default; three interface sizes (85%, 100%, 125%), a shared pixel mushroom and theme-aware window/tray icons. No WebView.
+- **Redesigned native UI:** 20 themes, Neon by default; three interface sizes (85%, 100%, 125%), refined pixel mushroom artwork, a separate mini logo and theme-aware window/tray icons. The original mycelium growth animation is preserved. No WebView.
 - **Animated background:** a lava-lamp effect with software rendering. Effects can be disabled.
 - **Portable rule presets:** separate Presets and Rules pages, six editable lists, templates and JSON import/export. Exported presets contain rules and metadata without server credentials; imports start disabled with a new identity.
 - **Expanded defaults:** 286 gaming processes, 1,123 gaming domain rules and 17 torrent-client processes, alongside Russian services, Steam and Ozon. Domain providers ship offline seeds and refresh every six hours.
@@ -36,7 +42,7 @@ Slint is the only UI in this branch. Use `Build-Release.ps1` to build it; previo
 - **Experimental full routing and WFP traffic protection.** Real Windows VM qualification of leaks, service recovery and reboot behavior is still incomplete; these features are not a qualified kill switch.
 - **Experimental Mycelium import and core integration**, including HTTP/2 pooling in matching core builds. Transport capabilities depend on the supplied core and server; parser support for an HTTP/3 option does not establish its availability.
 
-<p align="center"><img src="assets/appearance-preview.png" alt="Mukhomor 0.8.1 theme examples with synthetic demo servers" width="100%"></p>
+<p align="center"><img src="assets/appearance-preview.png" alt="Mukhomor development UI theme examples with synthetic demo servers" width="100%"></p>
 
 ## Native Slint client
 
@@ -52,14 +58,14 @@ Choose the Windows ZIP, Linux tar.gz or Android APK from the release. Linux: ext
 
 Windows:
 
-1. Download `Mukhomor-0.8.2-windows-x64.zip` from [Releases](https://github.com/0nionow1/Mukhomor/releases/tag/v0.8.2) and extract the **entire** archive.
+1. Download `Mukhomor-0.8.8-windows-x64.zip` from [Releases](https://github.com/Mukhomo/Mukhomor/releases/tag/v0.8.8) and extract the **entire** archive.
 2. Run `Mukhomor/mukhomor.exe`. Initial setup and updates request administrator permission.
 3. Click **Add configuration** and import your server file or paste its share link/text.
 4. Select a server and connect. Use **Rules** to edit your game's `.exe` bypass if needed; use **Presets** to enable bundled or imported sets.
 
 You need your own server profile. No servers, subscriptions or credentials are included. Remote subscription URLs are not fetched automatically. Executables are currently unsigned; both release archives have SHA256 files.
 
-Closing the window keeps the VPN in the tray. **Exit Mukhomor** disconnects and restores DNS. Update from Settings; when upgrading from 0.8.1, extract the complete 0.8.2 release and run its EXE once. Profiles, rules and appearance preferences are retained.
+Closing the window keeps the VPN in the tray. **Exit Mukhomor** disconnects and restores DNS. Update from Settings; when upgrading from 0.8.1, extract the complete 0.8.8 release and run its EXE once. Profiles, rules and appearance preferences are retained.
 
 ## Routing and presets
 
@@ -91,7 +97,7 @@ Build on Windows with Rust MSVC, C++ Build Tools, Windows SDK and PowerShell 5.1
 
 ```powershell
 .\Fetch-Dependencies.ps1
-.\Build-Release.ps1 -Version 0.8.2
+.\Build-Release.ps1 -Version 0.8.8
 .\tests\Run-Checks.ps1
 ```
 

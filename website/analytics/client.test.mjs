@@ -40,7 +40,7 @@ function browser({enabled=true,stored={},dnt=false,gpc=false,storageBlocked=fals
   return {data,calls,scripts,challenges,aborted,preference,settings,revokes,document,window,navigator,panel,
     choose(value){assert(panel(),'choice panel is visible');panel().dispatch('click',{target:{closest:()=>({dataset:{choice:value}})}});},
     async approve(){challenges.at(-1).callback('test-challenge');await drain();},
-    async click(){document.dispatch('click',{isTrusted:true,type:'click',target:{closest:()=>({href:'https://github.com/0nionow1/Mukhomor',dataset:{}})}});await drain();},
+    async click(){document.dispatch('click',{isTrusted:true,type:'click',target:{closest:()=>({href:'https://github.com/Mukhomo/Mukhomor',dataset:{}})}});await drain();},
     advance(ms){clock+=ms;},completeSession(){resolveSession();},
     storage(value){if(value===null)data.clear();else data.set(KEY+'consent',JSON.stringify(value));window.dispatch('storage',{key:value===null?null:KEY+'consent'});}
   };

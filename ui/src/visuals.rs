@@ -93,16 +93,17 @@ fn color(value: u32) -> slint::Color {
 }
 fn artwork<const W: usize, const H: usize>(
     rows: &[&[u8; W]; H],
+    tones: &[[u8; W]; H],
     colors: &[u32; mushroom::PALETTE_LEN],
     roots: bool,
 ) -> slint::Image {
     let mut image = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(W as u32, H as u32);
     for (y, row) in rows.iter().enumerate() {
-        for (x, glyph) in row.iter().enumerate() {
+        for (x, _glyph) in row.iter().enumerate() {
             if H > 48 && y >= 48 && !roots {
                 continue;
             }
-            if let Some(i) = mushroom::palette_index(*glyph) {
+            if let Some(i) = mushroom::tone_index(tones[y][x]) {
                 let c = color(colors[i]);
                 image.make_mut_slice()[y * W + x] =
                     slint::Rgba8Pixel::new(c.red(), c.green(), c.blue(), 255);
@@ -179,12 +180,15 @@ pub fn apply(ui: &AppWindow, theme: appearance::Theme, effects: bool) {
         colors[9],
         theme == appearance::Theme::Paper,
     );
-    ui.set_app_icon(artwork(&mushroom::MINI, &palette, false));
+    ui.set_app_icon(artwork(&mushroom::MINI, &mushroom::MINI_TONES, &palette, false));
     ui.set_system_icon(slint::Image::from_rgba8(system_icon_buffer(&palette, 32)));
-    ui.set_hero_image(artwork(&mushroom::HERO, &palette, false));
-    ui.set_hero_connected_image(artwork(&mushroom::HERO, &palette, true));
+    ui.set_hero_image(artwork(&mushroom::HERO, &mushroom::HERO_TONES, &palette, false));
+    ui.set_hero_connected_image(artwork(&mushroom::HERO, &mushroom::HERO_TONES, &palette, true));
     ui.set_navigation_icons(
         std::rc::Rc::new(slint::VecModel::from((0..4).map(icon).collect::<Vec<_>>())).into(),
+    );
+    ui.set_connection_icons(
+        std::rc::Rc::new(slint::VecModel::from([9, 10, 0].map(icon).to_vec())).into(),
     );
     ui.set_check_icon(icon(4));
     ui.set_close_icon(caption(true));
@@ -233,7 +237,7 @@ mod motion {
             );
             for (y, row) in mushroom::HERO.iter().enumerate() {
                 for (x, &glyph) in row.iter().enumerate() {
-                    let Some(index) = mushroom::palette_index(glyph) else {
+                    let Some(index) = mushroom::hero_palette_index(y, x) else {
                         continue;
                     };
                     let coverage = growth.coverage(y, x, amount);
@@ -347,7 +351,7 @@ mod system_icon_tests {
     use super::*;
 
     #[test]
-    fn system_icon_fills_its_canvas_at_tray_and_taskbar_sizes() {
+    fn themed_optical_icons_keep_their_pixels_and_alpha_at_system_sizes() {
         for theme in appearance::Theme::ALL {
             let c = theme.colors();
             let palette =
@@ -355,10 +359,13 @@ mod system_icon_tests {
             for size in [16, 20, 24, 32, 40, 48, 64] {
                 let buffer = system_icon_buffer(&palette, size as u32);
                 let pixels = buffer.as_slice();
-                assert!(pixels[..size].iter().any(|p| p.a == 255));
-                assert!(pixels[(size - 1) * size..].iter().any(|p| p.a == 255));
-                assert!((0..size).any(|y| pixels[y * size].a == 255));
-                assert!((0..size).any(|y| pixels[y * size + size - 1].a == 255));
+                assert!(pixels.iter().filter(|p| p.a == 255).count() > size * size / 4);
+                for (offset, pixel) in pixels.iter().enumerate() {
+                    if let Some(index) = mushroom::icon_palette_index(offset % size, offset / size, size) {
+                        let expected = color(palette[index]);
+                        assert_eq!((pixel.r,pixel.g,pixel.b,pixel.a),(expected.red(),expected.green(),expected.blue(),255));
+                    } else { assert_eq!(pixel.a,0); }
+                }
                 assert!(pixels.iter().all(|p| p.a == 0 || p.a == 255));
                 // The header still uses its original padded layout artwork.
                 assert_eq!(mushroom::MINI[0][0], b'.');

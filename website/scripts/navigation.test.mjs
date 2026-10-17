@@ -133,7 +133,7 @@ test('About uses the same wipe and restores anchor plus keyboard focus', () => {
 
 test('native link behavior is preserved outside the page-transition scope', () => {
   for (const [url, attrs, flags] of [
-    ['https://github.com/0nionow1/Mukhomor'], ['#server'], ['./'],
+    ['https://github.com/Mukhomo/Mukhomor'], ['#server'], ['./'],
     ['docs.html', { target: '_blank' }], ['docs.html', { download: true }],
     ['assets/app-preview.png'], ['/another-project/docs.html'],
     ...['ctrlKey', 'metaKey', 'shiftKey', 'altKey'].map(flag => ['docs.html', {}, { [flag]: true }]),

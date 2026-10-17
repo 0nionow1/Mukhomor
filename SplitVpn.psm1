@@ -509,7 +509,12 @@ function New-ValidatedCoreConfig([string]$Root, $s, [bool]$TunEnabled, $Transpor
     $projection=Get-RuleSettingsProjection $s
     $s=$projection.settings
     if ($null -ne $RuleIssues) {$RuleIssues.Value=$projection.issues}
-    $proxy=Get-SelectedSplitProxy $Root
+    if(!$Transport){
+        $sessionPath=Join-Path $Root 'runtime\session.json'
+        if(Test-Path -LiteralPath $sessionPath){$session=Read-JsonFile $sessionPath;if($session.ContainsKey('transport')){$Transport=$session.transport}}
+    }
+    $isTor=$Transport -and $Transport.ContainsKey('network') -and $Transport.network -in @('tor','i2p')
+    if($isTor){$proxy=$Transport.tor_proxy;$s.routing.mode='full';$s.routing.allow_lan=$false}else{$proxy=Get-SelectedSplitProxy $Root}
     $full=($s.routing.mode -ceq 'full')
     # The outer AWG socket must never be routed back into its own TUN.
     # Only the VPN endpoint is excluded here; service IPs remain domain driven.
@@ -527,7 +532,7 @@ function New-ValidatedCoreConfig([string]$Root, $s, [bool]$TunEnabled, $Transpor
         if ($endpointAddresses -notcontains $Transport.selected_address) { throw 'VPN transport address is not in the endpoint set' }
         # Preserve the hostname for native TLS/SNI/transport Host defaults.
         if($proxy.type -eq 'wireguard'){$proxy.server=$Transport.selected_address}
-        $proxy['interface-name']=$Transport.interface_name
+        if(!$isTor){$proxy['interface-name']=$Transport.interface_name}
     }
     $endpointPrefixes=@(Get-EndpointPrefixes $endpointAddresses)
     $rules=New-Object 'Collections.Generic.List[string]'
@@ -583,7 +588,8 @@ function New-ValidatedCoreConfig([string]$Root, $s, [bool]$TunEnabled, $Transpor
             $rules.Add("$kind,$cidr,DIRECT,no-resolve")
         }
     }
-    $rules.Add('MATCH,AWG')
+    if($isTor){$rules.Add('NETWORK,udp,REJECT')}
+    if($isTor -and $Transport.network -eq 'i2p'){$rules.Add('DOMAIN-SUFFIX,i2p,AWG');$rules.Add('MATCH,REJECT')}else{$rules.Add('MATCH,AWG')}
     $dns=@{enable=$true;listen="127.0.0.1:$($s.ports.dns)";ipv6=($proxy.type -ne 'wireguard' -or $proxy.ContainsKey('ipv6'));'enhanced-mode'='fake-ip';'fake-ip-range'='198.18.0.1/16';'fake-ip-filter'=@('*.lan','*.local','localhost');'default-nameserver'=@('1.1.1.1','8.8.8.8');nameserver=@('https://cloudflare-dns.com/dns-query','https://dns.google/dns-query');'proxy-server-nameserver'=@('https://cloudflare-dns.com/dns-query#DIRECT','https://dns.google/dns-query#DIRECT');'direct-nameserver'=@('https://cloudflare-dns.com/dns-query#DIRECT','https://dns.google/dns-query#DIRECT');'respect-rules'=$true}
     $hosts=@{}
     if ($full) {
@@ -602,14 +608,15 @@ function New-ValidatedCoreConfig([string]$Root, $s, [bool]$TunEnabled, $Transpor
             $hosts[$proxy.server]=$Transport.selected_address
         }
     }
+    if($isTor -and $Transport.network -eq 'i2p'){foreach($key in @('nameserver','proxy-server-nameserver','direct-nameserver')){$dns[$key]=@('rcode://success')};$dns['default-nameserver']=@('127.0.0.1:1');$dns.ipv6=$false}
     return @{
-        'mixed-port'=$s.ports.proxy;'allow-lan'=$false;'bind-address'='127.0.0.1';mode='rule';'log-level'='warning';ipv6=$true
+        'mixed-port'=$(if($isTor){0}else{$s.ports.proxy});'allow-lan'=$false;'bind-address'='127.0.0.1';mode='rule';'log-level'=$(if($isTor){'silent'}else{'warning'});ipv6=$true
         # Socket-table enumeration is unnecessary when there are no EXE rules.
         # With EXE rules, strict performs the same lookup when their turn arrives.
         'find-process-mode'=$(if (!$full -and ($s.direct.process_names.Count -or $s.direct.process_paths.Count)) {'strict'} else {'off'});'external-controller'="127.0.0.1:$($s.ports.controller)";secret=(Get-Content -LiteralPath (Join-Path $Root 'private\api-token.txt') -Raw).Trim()
-        'geo-auto-update'=$false;profile=@{'store-fake-ip'=$true};proxies=@($proxy);rules=@($rules.ToArray());dns=$dns
+        'geo-auto-update'=$false;profile=@{'store-fake-ip'=(!$isTor)};proxies=@($proxy);rules=@($rules.ToArray());dns=$dns
         tun=@{enable=$TunEnabled;stack='system';device='Mukhomor';'auto-route'=$true;'auto-detect-interface'=$true;'strict-route'=$true;'dns-hijack'=@('any:53','tcp://any:53');mtu=1500;'inet6-address'=@('fdfe:dcba:9876::1/126');'route-exclude-address'=$endpointPrefixes;'udp-timeout'=300}
-        sniffer=@{enable=$true;'force-dns-mapping'=$true;'parse-pure-ip'=$true;'override-destination'=$false;sniff=@{HTTP=@{ports=@(80,'8080-8880')};TLS=@{ports=@(443,8443)};QUIC=@{ports=@(443,8443)}}}
+        sniffer=@{enable=(!$isTor);'force-dns-mapping'=$true;'parse-pure-ip'=$true;'override-destination'=$false;sniff=@{HTTP=@{ports=@(80,'8080-8880')};TLS=@{ports=@(443,8443)};QUIC=@{ports=@(443,8443)}}}
         'rule-providers'=$providers; hosts=$hosts
     }
 }
@@ -665,12 +672,13 @@ function Invoke-CoreApi([string]$Root, [string]$Route, [string]$Method='GET', $B
     return Invoke-RestMethod @params
 }
 
-function Set-SplitConfig([string]$Root, $Settings, [bool]$TunEnabled=$true, [switch]$Reload, $Transport=$null, [switch]$PassThru, $RuleIssues=$null) {
+function Set-SplitConfig([string]$Root, $Settings, [bool]$TunEnabled=$true, [switch]$Reload, $Transport=$null, [switch]$PassThru, $RuleIssues=$null, [switch]$SessionOnly) {
     if ($null -ne $RuleIssues -and $RuleIssues -isnot [System.Management.Automation.PSReference]) {throw 'RuleIssues must be a reference'}
     Initialize-SplitRoot $Root
     Invoke-SplitLock $Root {
         $normalized=Get-SplitSettings $Root $Settings
-        if ($Reload) {
+        if($SessionOnly -and (!$Transport -or !$Transport.ContainsKey('network') -or $Transport.network -notin @('tor','i2p'))){throw 'Session-only configuration requires a P2P transport'}
+        if ($Reload -and !$SessionOnly) {
             $currentPolicy=(Get-SplitSettings $Root).routing
             if ($normalized.routing.mode -cne $currentPolicy.mode -or $normalized.routing.allow_lan -ne $currentPolicy.allow_lan) { throw 'Disconnect VPN before changing routing mode or LAN access' }
         }
@@ -682,7 +690,7 @@ function Set-SplitConfig([string]$Root, $Settings, [bool]$TunEnabled=$true, [swi
         $old=if (Test-Path -LiteralPath $live) { [IO.File]::ReadAllText($live) } else { $null }
         $oldSettings=[IO.File]::ReadAllText((Join-Path $Root 'settings.json'))
         try {
-            Write-AtomicJson (Join-Path $Root 'settings.json') $normalized
+            if(!$SessionOnly){Write-AtomicJson (Join-Path $Root 'settings.json') $normalized}
             Write-AtomicText $live ([IO.File]::ReadAllText($candidate))
             if ($Reload) { Invoke-CoreApi $Root '/configs?force=true' 'PUT' @{path=$live} | Out-Null }
             if ($old) { Write-AtomicText (Join-Path $Root 'private\last-good.json') $old }

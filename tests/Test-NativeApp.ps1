@@ -46,7 +46,7 @@ function Test-SelectRollback {
     $mockIndex=@{schema=1;selected=$oldId;autoconnect=$false;profiles=@(@{id=$oldId;name='Old fixture';format='node';protocol='ss'},@{id=$targetId;name='Target fixture';format='node';protocol='ss'})}
     [IO.File]::WriteAllText((Join-Path $mockRoot 'private\profiles.json'),($mockIndex|ConvertTo-Json -Depth 12))
     $source=[IO.File]::ReadAllText((Join-Path $package 'NativeBridge.ps1'))
-    foreach($name in @('SplitVpn.psm1','SplitWindows.psm1')){
+    foreach($name in @('SplitVpn.psm1','SplitWindows.psm1','Tor.psm1')){
         $original="Import-Module (Join-Path `$PSScriptRoot '$name')"
         $absolute=(Join-Path $package $name).Replace("'","''")
         $source=$source.Replace($original,("Import-Module '$absolute'"))

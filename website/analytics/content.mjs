@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { fail, requireThat } from './http.mjs';
 
 export const CONTENT_LIMIT = 262144;
-export const REPOSITORY = 'https://github.com/0nionow1/Mukhomor';
+export const REPOSITORY = 'https://github.com/Mukhomo/Mukhomor';
 const versionPattern = /^(0|[1-9]\d{0,5})\.(0|[1-9]\d{0,5})\.(0|[1-9]\d{0,5})(?:-([0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*))?$/;
 const exact = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).sort().join('|') === [...keys].sort().join('|');
 const string = (value, max, empty = false) => typeof value === 'string' && (empty || value.trim().length > 0) && value.length <= max && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value);
@@ -53,7 +53,7 @@ export async function importGithubRelease(version, fetcher = fetch) {
   requireThat(version.length <= 60 && versionPattern.test(version),400,'invalid_version');
   let data;
   try {
-    const response=await fetcher(`https://api.github.com/repos/0nionow1/Mukhomor/releases/tags/v${encodeURIComponent(version)}`,{
+    const response=await fetcher(`https://api.github.com/repos/Mukhomo/Mukhomor/releases/tags/v${encodeURIComponent(version)}`,{
       headers:{Accept:'application/vnd.github+json','User-Agent':'Mukhomor-site-admin','X-GitHub-Api-Version':'2022-11-28'},
       signal:AbortSignal.timeout(6000),redirect:'error'
     });

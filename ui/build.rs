@@ -9,6 +9,7 @@ fn main() {
         "../assets/theme.json",
         "../native/visual_build.rs",
         "../native/src/mushroom.rs",
+        "../native/src/mushroom_data.rs",
         "../native/src/appearance.rs",
     ] {
         println!("cargo:rerun-if-changed={path}");

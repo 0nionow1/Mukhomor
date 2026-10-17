@@ -11,9 +11,13 @@ fn sample(ui: &AppWindow, count: usize) {
     ui.set_mobile(false);
     ui.global::<I18n>().on_translate(|text, _| text);
     mukhomor_ui::visuals::apply(ui, mukhomor_ui::visuals::appearance::Theme::Neon, true);
-    ui.set_status_text("Не подключено".into());
-    ui.set_primary_text("Подключиться".into());
     ui.set_phase("idle".into());
+    ui.set_active_network("vps".into());
+    ui.set_active_name("Сервер 01".into());
+    ui.set_pending_action("".into());
+    ui.set_connection_failed(false);
+    ui.set_live_profile_switch(true);
+    ui.set_notice_error(false);
     ui.set_ready(true);
     ui.set_busy(false);
     ui.set_update_busy(false);
@@ -31,6 +35,11 @@ fn sample(ui: &AppWindow, count: usize) {
     ui.set_rounding(true);
     ui.set_animation(true);
     ui.set_primary_enabled(count > 0);
+    ui.set_tor_enabled(true);
+    ui.set_p2p_selected("tor".into());
+    ui.set_tor_method_label("Snowflake".into());
+    ui.set_primary_stops_connection(false);
+    ui.set_connection_mode(0);
     ui.set_notice("".into());
     ui.window().set_minimized(false);
     ui.set_profiles(
@@ -51,7 +60,7 @@ fn sample(ui: &AppWindow, count: usize) {
         .into(),
     );
     ui.set_selected_id(if count == 0 { "" } else { "preview-0" }.into());
-    ui.set_selected_name("Сервер 01".into());
+    ui.set_selected_name(if count == 0 { "" } else { "Сервер 01" }.into());
     ui.set_theme_names(
         Rc::new(VecModel::from(
             mukhomor_ui::visuals::appearance::Theme::ALL
@@ -102,52 +111,164 @@ fn render(directory: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let ui = AppWindow::new()?;
     ui.show()?;
     for (name, count, width, height, scale, page, dialog) in [
-        ("startup-opening", 0, 560, 740, 1., 0, 0),
-        ("startup-growing", 0, 560, 740, 1., 0, 0),
+        ("startup-opening", 0, 560, 828, 1., 0, 0),
+        ("startup-growing", 0, 560, 828, 1., 0, 0),
         ("startup-mobile", 0, 360, 640, 1., 0, 0),
         ("startup-error", 0, 360, 580, 1., 0, 0),
-        ("startup-reduced-motion", 0, 560, 740, 1., 0, 0),
-        ("connection-reference", 12, 560, 740, 1., 0, 0),
-        ("connection-paper", 12, 560, 740, 1., 0, 0),
-        ("connection-glacier", 12, 560, 740, 1., 0, 0),
-        ("connection-empty", 0, 560, 740, 1., 0, 0),
-        ("connection-short", 2, 560, 740, 1., 0, 0),
-        ("connection-long", 512, 560, 740, 1., 0, 0),
-        ("connection-bottom", 512, 560, 740, 1., 0, 0),
-        ("connection-scrolled-selection", 512, 560, 740, 1., 0, 0),
+        ("startup-reduced-motion", 0, 560, 828, 1., 0, 0),
+        ("connection-reference", 12, 560, 828, 1., 0, 0),
+        ("connection-paper", 12, 560, 828, 1., 0, 0),
+        ("connection-glacier", 12, 560, 828, 1., 0, 0),
+        ("connection-empty", 0, 560, 828, 1., 0, 0),
+        ("connection-short", 2, 560, 828, 1., 0, 0),
+        ("connection-long", 512, 560, 828, 1., 0, 0),
+        ("connection-bottom", 512, 560, 828, 1., 0, 0),
+        ("connection-scrolled-selection", 512, 560, 828, 1., 0, 0),
         ("connection-compact", 512, 360, 640, 1., 0, 0),
         ("connection-minimum", 512, 360, 580, 1., 0, 0),
-        ("connection-small", 512, 560, 740, 0.85, 0, 0),
-        ("connection-large", 512, 620, 900, 1.25, 0, 0),
-        ("import", 2, 560, 740, 1., 0, 1),
+        ("connection-small", 512, 560, 828, 0.85, 0, 0),
+        ("connection-large", 512, 620, 1010, 1.25, 0, 0),
+        ("import", 2, 560, 828, 1., 0, 1),
         ("import-compact", 2, 360, 640, 1., 0, 1),
         ("rename-compact", 2, 360, 640, 1., 0, 2),
-        ("rules", 2, 560, 740, 1., 1, 0),
+        ("rules", 2, 560, 828, 1., 1, 0),
         ("rules-compact", 2, 360, 640, 1., 1, 0),
         ("rules-dirty-compact", 2, 360, 640, 1., 1, 0),
-        ("presets", 2, 560, 740, 1., 2, 0),
-        ("presets-paper", 2, 560, 740, 1., 2, 0),
-        ("presets-focus", 2, 560, 740, 1., 2, 0),
+        ("presets", 2, 560, 828, 1., 2, 0),
+        ("presets-paper", 2, 560, 828, 1., 2, 0),
+        ("presets-focus", 2, 560, 828, 1., 2, 0),
         ("presets-compact", 2, 360, 640, 1., 2, 0),
-        ("presets-long", 2, 560, 740, 1., 2, 0),
-        ("preset-editor", 2, 560, 740, 1., 2, 4),
-        ("settings", 2, 560, 740, 1., 3, 0),
-        ("update-available", 2, 560, 740, 1., 3, 0),
+        ("presets-long", 2, 560, 828, 1., 2, 0),
+        ("preset-editor", 2, 560, 828, 1., 2, 4),
+        ("settings", 2, 560, 828, 1., 3, 0),
+        ("update-available", 2, 560, 828, 1., 3, 0),
         ("update-mobile", 2, 360, 640, 1., 3, 0),
         ("update-downloading", 2, 360, 640, 1., 3, 0),
-        ("settings-paper", 2, 560, 740, 1., 3, 0),
-        ("settings-disabled", 2, 560, 740, 1., 3, 0),
+        ("settings-paper", 2, 560, 828, 1., 3, 0),
+        ("settings-disabled", 2, 560, 828, 1., 3, 0),
         ("settings-compact", 2, 360, 640, 1., 3, 0),
-        ("appearance", 2, 560, 740, 1., 3, 0),
-        ("appearance-dropdown", 2, 560, 740, 1., 3, 0),
-        ("dirty-exit", 2, 560, 740, 1., 1, 9),
+        ("settings-bottom", 2, 560, 828, 1., 3, 0),
+        ("settings-bottom-compact", 2, 360, 640, 1., 3, 0),
+        ("settings-bottom-small", 2, 560, 828, 0.85, 3, 0),
+        ("settings-bottom-large", 2, 620, 1010, 1.25, 3, 0),
+        ("appearance", 2, 560, 828, 1., 3, 0),
+        ("appearance-dropdown", 2, 560, 828, 1., 3, 0),
+        ("dirty-exit", 2, 560, 828, 1., 1, 9),
         ("dirty-exit-compact", 2, 360, 640, 1., 1, 9),
+        ("website-connection", 3, 560, 828, 1., 0, 0),
+        ("website-rules", 3, 560, 828, 1., 1, 0),
+        ("website-connection-paper", 3, 560, 828, 1., 0, 0),
+        ("website-connection-glacier", 3, 560, 828, 1., 0, 0),
+        ("website-rules-paper", 3, 560, 828, 1., 1, 0),
+        ("website-rules-glacier", 3, 560, 828, 1., 1, 0),
+        ("website-presets-paper", 3, 560, 828, 1., 2, 0),
+        ("website-presets-glacier", 3, 560, 828, 1., 2, 0),
+        ("website-appearance-paper", 3, 560, 828, 1., 3, 0),
+        ("website-appearance-glacier", 3, 560, 828, 1., 3, 0),
+        ("navigation-focus", 2, 560, 828, 1., 3, 0),
+        ("navigation-focus-compact", 2, 360, 640, 1., 3, 0),
+        ("action-focus", 2, 560, 828, 1., 3, 0),
+        ("action-focus-paper", 2, 560, 828, 1., 3, 0),
+        ("mode-tor", 12, 560, 828, 1., 0, 0),
+        ("mode-tor-compact", 0, 360, 640, 1., 0, 0),
+        ("mode-i2p", 0, 560, 828, 1., 0, 0),
+        ("mode-i2p-compact", 0, 360, 640, 1., 0, 0),
+        ("mode-tor-bridges", 0, 560, 828, 1., 0, 12),
+        ("mode-tor-bridges-compact", 0, 360, 640, 1., 0, 12),
+        ("mode-tor-amp-compact", 0, 360, 640, 1., 0, 12),
+        ("mode-subscription", 12, 560, 828, 1., 0, 0),
+        ("mode-subscription-paper", 12, 560, 828, 1., 0, 0),
+        ("mode-subscription-glacier", 12, 560, 828, 1., 0, 0),
+        ("mode-subscription-compact", 12, 360, 640, 1., 0, 0),
+        ("mode-subscription-english", 12, 360, 640, 1., 0, 0),
+        ("modes-interaction", 12, 560, 828, 1., 0, 0),
+        ("connection-minimum-notice", 512, 360, 580, 1., 0, 0),
+        ("ux-connecting-tor", 2, 560, 828, 1., 0, 0),
+        ("ux-connecting-i2p", 0, 360, 640, 1., 0, 0),
+        ("ux-connected-tor-vps", 2, 560, 828, 1., 0, 0),
+        ("ux-connected-vps-p2p", 2, 360, 640, 1., 0, 0),
+        ("ux-connected-subscription", 2, 560, 828, 1., 0, 0),
+        ("ux-connected-i2p", 2, 360, 580, 1., 0, 0),
+        ("ux-switching", 2, 560, 828, 1., 0, 0),
+        ("ux-selecting", 2, 360, 640, 1., 0, 0),
+        ("ux-disconnecting", 2, 360, 580, 1., 0, 0),
+        ("ux-uncertain", 2, 560, 828, 1., 0, 0),
+        ("ux-recovery", 2, 360, 640, 1., 0, 0),
+        ("ux-error", 2, 360, 580, 1., 0, 0),
+        ("ux-long-name", 2, 360, 640, 1., 0, 0),
     ] {
         sample(&ui, count);
+        if name.starts_with("ux-") {
+            let phase = match name {
+                "ux-connecting-tor" | "ux-connecting-i2p" => "connecting",
+                "ux-switching" => "switching",
+                "ux-disconnecting" => "disconnecting",
+                "ux-uncertain" => "uncertain",
+                "ux-recovery" => "recovery",
+                "ux-selecting" | "ux-error" => "idle",
+                _ => "connected",
+            };
+            ui.set_phase(phase.into());
+            ui.set_primary_enabled(true);
+            ui.set_primary_stops_connection(phase != "idle");
+            ui.set_busy(matches!(phase, "connecting" | "switching" | "disconnecting") || name == "ux-selecting");
+            if name.contains("i2p") || name.contains("tor") {
+                let network = if name.contains("i2p") { "i2p" } else { "tor" };
+                ui.set_active_network(network.into());
+                ui.set_active_name(if network == "tor" { "Tor" } else { "I2P" }.into());
+                ui.set_p2p_selected(network.into());
+                ui.set_connection_mode(if name.ends_with("-vps") { 0 } else { 1 });
+            }
+            if name == "ux-connected-vps-p2p" { ui.set_connection_mode(1); }
+            if name == "ux-connected-subscription" { ui.set_connection_mode(2); }
+            if name == "ux-selecting" { ui.set_pending_action("Select".into()); ui.set_primary_enabled(false); }
+            if name == "ux-error" {
+                ui.set_connection_failed(true);
+                ui.set_notice_error(true);
+                ui.set_notice("Не удалось связаться с сервером. Проверьте подключение к интернету, адрес сервера и настройки профиля, затем повторите подключение.".into());
+            }
+            if name == "ux-long-name" {
+                ui.set_active_name("Очень длинное название подключённого сервера для проверки текста состояния".into());
+            }
+            assert!(!ui.get_status_text().is_empty() && !ui.get_connection_hint().is_empty());
+            if name == "ux-disconnecting" { assert!(!ui.get_connection_action_enabled()); }
+            if name == "ux-error" { assert_eq!(ui.get_primary_text().as_str(), "Повторить"); }
+            if name == "ux-selecting" { assert!(!ui.get_connection_action_enabled()); }
+            if name == "ux-connected-vps-p2p" || name == "ux-connected-tor-vps" || name == "ux-connected-subscription" {
+                assert_eq!(ui.get_primary_text().as_str(), "Отключиться");
+                assert!(ui.get_connection_action_enabled());
+                assert!(ui.get_connection_hint().contains("Вкладка не меняет VPN"));
+            }
+        }
+        if name == "connection-minimum-notice" {
+            ui.set_notice("Конфигурация добавлена".into());
+        }
+        if name.starts_with("mode-tor-bridges") { ui.set_tor_method(1); }
+        if name == "mode-tor-amp-compact" { ui.set_tor_method(4); }
+        if name.starts_with("mode-") {
+            ui.set_connection_mode(if name.starts_with("mode-tor") || name.starts_with("mode-i2p") { 1 } else { 2 });
+        }
+        if name.starts_with("mode-i2p") { ui.set_p2p_selected("i2p".into()); }
+        if name == "mode-subscription-english" {
+            ui.global::<I18n>().on_translate(|text, _| match text.as_str() {
+                "Свой VPS" => "Own VPS".into(),
+                "Подписка" => "Subscription".into(),
+                "Подписка Mukhomor" => "Mukhomor subscription".into(),
+                "В разработке" => "In development".into(),
+                "Скоро" => "Coming soon".into(),
+                "Не подключено" => "Disconnected".into(),
+                "Подписка в разработке. Выберите VPS или P2P." => "Subscription is coming soon. Choose VPS or P2P.".into(),
+                "Подключение" => "Connection".into(),
+                "Правила" => "Rules".into(),
+                "Наборы" => "Presets".into(),
+                "Настройки" => "Settings".into(),
+                _ => text,
+            });
+        }
         if name.starts_with("update-") {
             ui.set_update_available(true);
             ui.set_update_install_enabled(true);
-            ui.set_update_version("0.8.3".into());
+            ui.set_update_version("0.8.4".into());
             ui.set_update_status("Доступна новая версия".into());
             ui.set_mobile(name == "update-mobile");
             if name == "update-downloading" {
@@ -190,12 +311,13 @@ fn render(directory: &Path) -> Result<(), Box<dyn std::error::Error>> {
                 ))
                 .into(),
             );
-            ui.set_primary_text("Отключиться".into());
             ui.set_phase("connected".into());
+            ui.set_primary_stops_connection(true);
+            ui.set_active_name("France · Paris".into());
         }
         if name.ends_with("paper") {
             mukhomor_ui::visuals::apply(&ui, mukhomor_ui::visuals::appearance::Theme::Paper, true);
-        } else if name == "connection-glacier" {
+        } else if name.ends_with("glacier") {
             mukhomor_ui::visuals::apply(
                 &ui,
                 mukhomor_ui::visuals::appearance::Theme::Glacier,
@@ -217,7 +339,15 @@ fn render(directory: &Path) -> Result<(), Box<dyn std::error::Error>> {
                 .into(),
             );
         }
-        ui.set_appearance_open(name.starts_with("appearance"));
+        ui.set_appearance_open(name.starts_with("appearance") || name.starts_with("website-appearance"));
+        let theme = if name.ends_with("paper") {
+            mukhomor_ui::visuals::appearance::Theme::Paper
+        } else if name.ends_with("glacier") {
+            mukhomor_ui::visuals::appearance::Theme::Glacier
+        } else {
+            mukhomor_ui::visuals::appearance::Theme::Neon
+        };
+        ui.set_theme_index(mukhomor_ui::visuals::appearance::Theme::ALL.iter().position(|item| *item == theme).unwrap() as i32);
         if name == "settings-disabled" {
             ui.set_autostart_available(false);
             ui.set_ready(false);
@@ -233,7 +363,23 @@ fn render(directory: &Path) -> Result<(), Box<dyn std::error::Error>> {
                 .join("\n")
                 .into(),
         );
+        // Public website fixtures use only synthetic profiles and valid example
+        // process names. They never read a configuration or start a connection.
+        if name.starts_with("website-") {
+            ui.set_profiles(Rc::new(VecModel::from(vec![
+                Profile { id: "preview-0".into(), name: "Мой VPS".into(), protocol: "WireGuard".into(), selected: true },
+                Profile { id: "preview-1".into(), name: "Рабочий сервер".into(), protocol: "VLESS".into(), selected: false },
+                Profile { id: "preview-2".into(), name: "Запасной сервер".into(), protocol: "Hysteria 2".into(), selected: false },
+            ])).into());
+            ui.set_selected_name("Мой VPS".into());
+            ui.set_rule_section(0);
+            ui.set_rules_text("game.exe\nlauncher.exe".into());
+        }
         surface.set_size(slint::PhysicalSize::new(width, height));
+        if !name.starts_with("startup-") {
+            ui.set_animation(false);
+            mukhomor_ui::visuals::preview_frame(&ui, theme, 2800);
+        }
         if name.starts_with("startup-") {
             ui.set_animation(false);
             ui.set_boot_active(true);
@@ -263,6 +409,102 @@ fn render(directory: &Path) -> Result<(), Box<dyn std::error::Error>> {
             drawn = true;
         });
         assert!(drawn, "scene {name} was not rendered");
+        if name == "ux-error" {
+            let original = pixels.clone();
+            ui.window().dispatch_event(slint::platform::WindowEvent::PointerScrolled {
+                position: slint::LogicalPosition::new(100., ui.get_connection_hint_bottom() - 12.),
+                delta_x: 0., delta_y: -1000.,
+            });
+            surface.request_redraw();
+            surface.draw_if_needed(|renderer| { renderer.render(&mut pixels, width as usize); });
+            assert_ne!(pixels, original, "long error message cannot be scrolled to read its end");
+            ui.window().dispatch_event(slint::platform::WindowEvent::PointerScrolled {
+                position: slint::LogicalPosition::new(100., ui.get_connection_hint_bottom() - 12.),
+                delta_x: 0., delta_y: 1000.,
+            });
+            surface.request_redraw();
+            surface.draw_if_needed(|renderer| { renderer.render(&mut pixels, width as usize); });
+        }
+        if name.starts_with("settings-bottom") {
+            ui.window().dispatch_event(slint::platform::WindowEvent::PointerScrolled {
+                position: slint::LogicalPosition::new(width as f32 / 2., height as f32 / 2.),
+                delta_x: 0.,
+                delta_y: -10000.,
+            });
+            slint::platform::update_timers_and_animations();
+            surface.request_redraw();
+            surface.draw_if_needed(|renderer| { renderer.render(&mut pixels, width as usize); });
+        }
+        if name == "modes-interaction" {
+            use slint::platform::{PointerEventButton, WindowEvent};
+            let commands = Rc::new(RefCell::new(Vec::new()));
+            let captured = commands.clone();
+            ui.on_command(move |action, _, _| captured.borrow_mut().push(action));
+            let click = |x, y| {
+                let position = slint::LogicalPosition::new(x, y);
+                ui.window().dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Left });
+                ui.window().dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
+            };
+            for (mode, x) in [(1, 280.), (2, 472.)] {
+                click(x, 124.);
+                assert_eq!(ui.get_connection_mode(), mode, "mode tab did not switch");
+                assert_eq!(ui.get_primary_text().as_str(), if mode == 1 { "Подключиться" } else { "Скоро" });
+                assert!(ui.get_connection_hint().contains(if mode == 1 { "Tor" } else { "разработке" }));
+                assert_eq!(ui.get_connection_action_enabled(), mode == 1, "Tor must connect without a VPS; subscription stays unavailable");
+                click(280., ui.get_connection_caption_top() + 12.);
+                assert_eq!(commands.borrow().len(), if mode == 1 { 1 } else { 0 });
+                if mode == 1 { assert_eq!(commands.borrow()[0].as_str(), "primary"); }
+                commands.borrow_mut().clear();
+                click(100., ui.get_server_list_top() + 22.);
+                click(100., ui.get_primary_action_top() + 20.);
+                if mode == 1 {
+                    assert_eq!(commands.borrow().iter().map(|s|s.as_str()).collect::<Vec<_>>(),vec!["p2p-select","tor-options"],"P2P selection must only reach its own actions");
+                } else { assert!(commands.borrow().is_empty(), "unavailable mode reached VPS actions"); }
+                commands.borrow_mut().clear();
+                assert_eq!(ui.get_dialog(), 0, "hidden import action opened");
+                assert_eq!(ui.get_selected_id().as_str(), "preview-0");
+                assert_eq!(ui.get_profiles().row_count(), count);
+            }
+            // The focused subscription tab remains operable with a keyboard.
+            ui.set_connection_mode(0);
+            ui.window().dispatch_event(WindowEvent::KeyPressed { text: " ".into() });
+            ui.window().dispatch_event(WindowEvent::KeyReleased { text: " ".into() });
+            assert_eq!(ui.get_connection_mode(), 2);
+            // An existing connection remains stoppable from the subscription tab.
+            ui.set_primary_stops_connection(true);
+            click(280., ui.get_connection_caption_top() + 12.);
+            assert_eq!(commands.borrow().len(), 1);
+            assert_eq!(commands.borrow()[0].as_str(), "primary");
+            ui.set_primary_stops_connection(false);
+            click(88., 124.);
+            assert_eq!(ui.get_connection_mode(), 0);
+            assert!(ui.get_connection_action_enabled());
+            click(280., ui.get_connection_caption_top() + 12.);
+            assert_eq!(commands.borrow().len(), 2, "VPS connect stopped working");
+            ui.set_dialog(1);
+            click(472., 124.);
+            assert_eq!(ui.get_connection_mode(), 0, "modal leaked input to mode tabs");
+            ui.set_dialog(0);
+            ui.on_command(|_, _, _| {});
+            ui.window().dispatch_event(WindowEvent::PointerExited);
+            surface.request_redraw();
+            surface.draw_if_needed(|renderer| { renderer.render(&mut pixels, width as usize); });
+        }
+        if name.starts_with("navigation-focus") || name.starts_with("action-focus") {
+            // Move the pointer away after clicking so these captures show the
+            // retained focus/selection, without the temporary hover surface.
+            use slint::platform::{PointerEventButton, WindowEvent};
+            let position = if name.starts_with("navigation-focus") {
+                slint::LogicalPosition::new(if width < 450 { 297. } else { 484. }, height as f32 - 45.)
+            } else {
+                slint::LogicalPosition::new(280., 638.)
+            };
+            ui.window().dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Left });
+            ui.window().dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
+            ui.window().dispatch_event(WindowEvent::PointerExited);
+            surface.request_redraw();
+            surface.draw_if_needed(|renderer| { renderer.render(&mut pixels, width as usize); });
+        }
         if name == "startup-opening" {
             use slint::platform::{PointerEventButton, WindowEvent};
             let closes = Rc::new(std::cell::Cell::new(0));
@@ -371,7 +613,8 @@ fn render(directory: &Path) -> Result<(), Box<dyn std::error::Error>> {
                 renderer.render(&mut pixels, width as usize);
             });
         }
-        if page == 0 {
+        if page == 0 && ui.get_connection_mode() == 0 {
+            assert!(ui.get_connection_hint_bottom() <= ui.get_server_list_top() - 32. * scale, "{name}: hint overlaps list heading");
             assert!(
                 ui.get_server_list_bottom() < ui.get_primary_action_top(),
                 "{name}: list overlaps action"

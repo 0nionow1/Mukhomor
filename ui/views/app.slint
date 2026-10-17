@@ -99,6 +99,17 @@ component Surface inherits Rectangle {
     }
     @children
 }
+// A translucent capsule with pixel-stepped semicircular ends.
+component NavigationPill inherits Rectangle {
+    private property <length> unit: root.height / 20;
+    for inset[index] in [7,5,3,2,2,1,1,0,0,0,0,0,0,1,1,2,2,3,5,7]: TextureBand {
+        x: Palette.rounded ? inset * root.unit : 0px;
+        y: index * root.unit;
+        width: root.width - 2 * self.x; height: root.unit;
+        fill: Palette.panel.with-alpha(0.55);
+    }
+    @children
+}
 // Lists sit directly on the window field. Cover only the pixels outside their
 // stepped silhouette, sampling that same animated field in window coordinates.
 // This keeps a full-height viewport: no row padding or reduced visible capacity.
@@ -188,27 +199,26 @@ component Action inherits Rectangle {
     in property <bool> compact: false;
     in property <length> text-size: 24px * Palette.scale;
     private property <bool> active: enabled && (!Interaction.blocked || modal);
+    private property <bool> highlighted: root.active && (focus.has-focus || touch.has-hover);
     callback clicked;
     height: (compact ? 34px : 42px) * Palette.scale;
     vertical-stretch: 0;
     min-width: 0px;
     Surface {
-        visible: !root.flat || focus.has-focus || touch.has-hover;
-        fill: !root.enabled ? Palette.panel : root.primary ? Palette.accent : Palette.raised;
-        texture: !root.enabled ? 1 : root.primary ? 3 : 2;
-        outline: focus.has-focus || root.selected ? 1px : 0px;
-        stroke: Palette.teal;
+        visible: !root.flat || root.highlighted;
+        fill: !root.enabled ? Palette.panel : root.primary ? (root.highlighted ? Palette.teal : Palette.accent) : Palette.raised;
+        texture: !root.enabled ? 1 : root.primary ? (root.highlighted ? -1 : 3) : 2;
     }
     Label {
         x: root.compact ? 4px : 10px; width: parent.width - 2 * self.x; height: parent.height;
         text: root.text; horizontal-alignment: center;
         font-size: root.text-size;
-        color: !root.enabled ? Palette.muted : root.primary ? Palette.button-ink : root.selected ? Palette.teal : Palette.ink;
+        color: !root.enabled ? Palette.muted : root.primary ? Palette.button-ink : root.selected || root.highlighted ? Palette.teal : Palette.ink;
     }
     Image {
         source: root.glyph; width: root.glyph-size; height: self.width;
         x: (parent.width - self.width)/2; y: (parent.height - self.height)/2;
-        colorize: root.enabled ? root.glyph-color : Palette.muted;
+        colorize: !root.enabled ? Palette.muted : root.highlighted ? Palette.teal : root.glyph-color;
         image-rendering: pixelated;
     }
     focus := FocusScope {
@@ -249,7 +259,7 @@ component PixelScrollBar inherits Rectangle {
         thumb := PixelShape {
             x: floor((parent.width - self.width)/2px) * 1px;
             width: max(3,round(6 * Palette.scale)) * 1px;
-            height: min(parent.height,max(round(28 * Palette.scale) * 1px,
+            height: min(parent.height,max(min(round(28 * Palette.scale) * 1px, parent.height/2),
                 floor(parent.height * root.viewport-height / max(1px,root.content-height) / 1px) * 1px));
             y: round(clamp(-root.content-y / max(1px,root.maximum),0,1) * (parent.height - self.height) / 1px) * 1px;
             fill: Palette.accent;
@@ -281,6 +291,7 @@ component PixelScrollBar inherits Rectangle {
 component PageScroll inherits Rectangle {
     in property <bool> enabled: true;
     in property <length> gutter: 24px;
+    in property <length> scroll-inset: round(16 * Palette.scale) * 1px;
     view := ScrollView {
         x: 0px; y: 0px; width: parent.width - root.gutter; height: parent.height;
         enabled: root.enabled;
@@ -289,6 +300,7 @@ component PageScroll inherits Rectangle {
     }
     PixelScrollBar {
         x: parent.width - self.width; height: parent.height;
+        inset: root.scroll-inset;
         viewport-height: view.height; content-height: view.content-height; content-y <=> view.content-y;
         enabled: root.enabled;
     }
@@ -302,7 +314,7 @@ component Toggle inherits Rectangle {
     callback toggled;
     min-height: 42px * Palette.scale;
     max-height: 42px * Palette.scale;
-    Surface { fill: Palette.raised; texture: 2; outline: focus.has-focus ? 1px : 0px; stroke: Palette.teal; }
+    Surface { fill: Palette.raised; texture: 2; }
     Label { x: 10px; width: indicator.x - self.x - 12px * Palette.scale; height: parent.height; text: root.text; font-size: (root.width < 400px ? 20px : 24px) * Palette.scale; color: root.enabled ? Palette.ink : Palette.muted; }
     indicator := CheckIndicator {
         x: floor((parent.width - self.width - 10px * Palette.scale)/1px) * 1px;
@@ -437,17 +449,77 @@ export component AppWindow inherits Window {
     private property <length> content-height: max(0px, root.height - root.safe-top - root.safe-bottom);
     title: "Mukhomor";
     no-frame: true;
-    preferred-width: 560px; preferred-height: 740px;
+    preferred-width: 560px; preferred-height: 828px;
     min-width: 360px; min-height: 580px;
     background: transparent;
     default-font-family: "Tiny5"; default-font-size: 24px * Palette.scale;
     in property <[Profile]> profiles;
     in property <string> selected-id;
     in property <string> selected-name;
-    in property <string> status-text;
+    in property <string> active-network: "vps";
+    in property <string> active-name;
+    in property <string> pending-action;
+    in property <bool> connection-failed;
+    in property <bool> live-profile-switch;
+    private property <bool> connection-transition: root.phase == "connecting" || root.phase == "switching";
+    private property <bool> connection-attention: root.phase == "uncertain" || root.phase == "recovery";
+    private property <bool> other-mode: root.primary-stops-connection && (root.connection-mode == 2 || (root.connection-mode == 1) != (root.active-network == "tor" || root.active-network == "i2p"));
+    private property <string> connection-target: root.primary-stops-connection || root.pending-action == "Select" ? root.active-name : root.connection-mode == 1 ? (root.p2p-selected == "i2p" ? "I2P" : "Tor") : root.connection-mode == 0 ? root.selected-name : "";
+    out property <string> status-text: root.phase == "loading" ? I18n.tr("Загружаем состояние…")
+        : root.phase == "uncertain" ? I18n.tr("Состояние соединения неизвестно")
+        : root.phase == "recovery" ? I18n.tr("Требуется восстановление сети")
+        : root.phase == "disconnecting" ? I18n.tr("Отключаем VPN…")
+        : (root.phase == "switching" ? I18n.tr("Меняем сервер…")
+            : root.phase == "connecting" ? I18n.tr("Подключаемся…")
+            : root.phase == "connected" ? I18n.tr("Подключено")
+            : root.pending-action == "Select" ? I18n.tr("Выбираем сервер…")
+            : root.connection-failed ? I18n.tr("Не удалось подключиться")
+            : I18n.tr("Не подключено")) + (root.connection-target != "" ? " · " + root.connection-target : "");
     in property <string> phase: "loading";
-    in property <string> primary-text;
+    out property <string> primary-text: root.phase == "disconnecting" ? I18n.tr("Отключаем…")
+        : root.phase == "loading" ? I18n.tr("Подготовка…")
+        : root.connection-attention ? (root.primary-stops-connection ? I18n.tr("Вернуть сеть") : I18n.tr("Проверить"))
+        : root.connection-transition ? I18n.tr("Отменить")
+        : root.primary-stops-connection ? I18n.tr("Отключиться")
+        : root.busy ? I18n.tr("Подождите…")
+        : root.connection-mode == 2 ? I18n.tr("Скоро")
+        : root.connection-mode == 0 && root.selected-id == "" ? I18n.tr("Добавьте сервер")
+        : root.connection-failed ? I18n.tr("Повторить") : I18n.tr("Подключиться");
+    out property <string> connection-hint: root.phase == "uncertain" ? I18n.tr("Проверяем связь. Статус VPN пока не подтверждён.")
+        : root.phase == "recovery" ? I18n.tr("Нажмите на гриб, чтобы восстановить сеть.")
+        : root.phase == "disconnecting" ? I18n.tr("Возвращаем обычное подключение. Подождите.")
+        : root.phase == "loading" ? I18n.tr("Готовим приложение. Подождите.")
+        : root.other-mode ? I18n.tr("Вкладка не меняет VPN. Для смены типа отключитесь.")
+        : root.phase == "switching" ? I18n.tr("Переподключаем VPN к выбранному серверу.")
+        : root.phase == "connecting" ? (root.active-network == "tor" ? I18n.tr("Первый запуск Tor — до 6 минут. Можно отменить.")
+            : root.active-network == "i2p" ? I18n.tr("Первый запуск I2P — до 8 минут. Можно отменить.")
+            : I18n.tr("Ждём ответа сервера. Можно отменить нажатием."))
+        : root.busy ? (root.pending-action == "Select" ? I18n.tr("Сохраняем выбор. VPN пока не включён.") : I18n.tr("Выполняем операцию. Дождитесь завершения."))
+        : root.phase == "connected" ? (root.active-network == "i2p" ? I18n.tr("Работает только I2P. Для смены сети отключитесь.")
+            : root.active-network == "tor" ? I18n.tr("Работает Tor. Для смены сети отключитесь.")
+            : root.live-profile-switch ? I18n.tr("Выбор другого сервера переподключит VPN.") : I18n.tr("Для смены сервера сначала отключитесь."))
+        : root.primary-stops-connection ? I18n.tr("Нажмите на гриб, чтобы завершить подключение.")
+        : root.connection-mode == 2 ? I18n.tr("Подписка в разработке. Выберите VPS или P2P.")
+        : !root.ready ? I18n.tr("Управление VPN пока недоступно. Подождите.")
+        : root.connection-failed ? I18n.tr("Проверьте сеть и настройки, затем повторите.")
+        : root.connection-mode == 1 ? (root.p2p-selected == "i2p" ? I18n.tr("Нажмите на гриб: только .i2p, без обычного интернета.") : I18n.tr("Нажмите на гриб для подключения к Tor."))
+        : root.selected-id == "" ? I18n.tr("Добавьте конфигурацию кнопкой ниже.")
+        : I18n.tr("Сервер выбран. Нажмите на гриб для подключения.");
     in property <bool> primary-enabled;
+    in property <bool> tor-enabled;
+    in-out property <string> p2p-selected: "tor";
+    in property <[Profile]> p2p-networks: [
+        {id: "tor", name: "Tor", protocol: "TCP", selected: root.p2p-selected == "tor"},
+        {id: "i2p", name: "I2P", protocol: "TCP", selected: root.p2p-selected == "i2p"}
+    ];
+    in property <string> tor-method-label;
+    in-out property <int> tor-method: 0;
+    in-out property <string> tor-bridges;
+    in property <bool> primary-stops-connection;
+    in-out property <int> connection-mode: 0;
+    out property <bool> connection-action-enabled: root.phase != "loading" && root.phase != "disconnecting"
+        && ((root.phase == "uncertain" && !root.primary-stops-connection) || (root.primary-enabled && (root.connection-mode == 0 || root.primary-stops-connection)) || (!root.primary-stops-connection && root.connection-mode == 1 && root.tor-enabled));
+    out property <bool> profile-selection-enabled: root.ready && !root.busy && (!root.primary-stops-connection || (root.live-profile-switch && root.active-network != "tor" && root.active-network != "i2p" && root.phase == "connected"));
     in property <bool> ready;
     in property <bool> busy;
     in property <bool> update-busy;
@@ -518,6 +590,7 @@ export component AppWindow inherits Window {
     in property <image> close-icon;
     in property <image> minimize-icon;
     in property <[image]> navigation-icons;
+    in property <[image]> connection-icons;
     in-out property <float> texture-width <=> Art.width;
     in-out property <float> texture-height <=> Art.height;
     in property <bool> show-roots;
@@ -529,10 +602,21 @@ export component AppWindow inherits Window {
     callback minimize-window();
     callback close-window();
     private property <length> margin: root.content-width < 450px ? 16px : max(24px, (root.content-width - 520px * Palette.scale)/2);
-    private property <bool> compact: root.content-height < 680px * Palette.scale;
+    private property <bool> compact: root.content-height < 768px * Palette.scale;
+    private property <bool> tight: root.content-height < 620px * Palette.scale;
+    private property <length> connection-strip-height: (root.compact ? 64px : 80px) * Palette.scale;
+    private property <length> connection-offset: root.connection-strip-height + 8px * Palette.scale;
     private property <length> footer: root.content-height - 104px * Palette.scale;
     private property <length> actions-y: root.footer - 42px * Palette.scale;
-    private property <length> list-y: (root.compact ? 280px : 352px) * Palette.scale + (root.notice != "" ? 36px : 0px);
+    private property <length> hero-top: (root.tight ? 96px : root.compact ? 104px : 112px) * Palette.scale + root.connection-offset;
+    private property <length> hero-art-height: (root.tight ? 88px : root.compact ? 116px : 168px) * Palette.scale;
+    private property <length> hero-label-top: root.hero-top + root.hero-art-height + (root.tight ? 2px : 4px) * Palette.scale;
+    private property <length> hero-status-top: root.hero-label-top + (root.tight ? 28px : 36px) * Palette.scale;
+    private property <length> hero-hint-top: root.hero-status-top + (root.tight ? 22px : 26px) * Palette.scale;
+    private property <length> hero-hint-height: (root.tight ? 32px : 40px) * Palette.scale;
+    private property <length> list-y: root.hero-hint-top + root.hero-hint-height + 32px * Palette.scale;
+    out property <length> connection-caption-top: root.hero-label-top;
+    out property <length> connection-hint-bottom: root.hero-hint-top + root.hero-hint-height;
     private property <length> row-height: 44px * Palette.scale;
     out property <length> server-list-width: server-list.width;
     out property <length> server-content-width: server-view.width;
@@ -566,50 +650,162 @@ export component AppWindow inherits Window {
         x: 0px; y: 0px; width: root.content-width;
         height: 88px * Palette.scale;
         enabled: root.dialog == 0 && !root.mobile;
-        Image { source: root.app-icon; x: root.margin - 6px; y: 20px * Palette.scale; width: 48px * Palette.scale; height: self.width; image-rendering: pixelated; }
-        Label { x: root.margin + 48px * Palette.scale; y: 25px * Palette.scale; height: 32px * Palette.scale; text: "Mukhomor"; }
-        Hint { x: root.margin + 170px * Palette.scale; y: 31px * Palette.scale; height: 24px * Palette.scale; text: "v0.8.2"; }
+        Image {
+            source: root.app-icon; x: root.margin + 2px * Palette.scale;
+            y: app-title.y + (app-title.height - self.height)/2;
+            width: 32px * Palette.scale; height: self.width;
+            image-rendering: pixelated;
+        }
+        app-title := Label { x: root.margin + 48px * Palette.scale; y: 25px * Palette.scale; height: 32px * Palette.scale; text: "Mukhomor"; }
+        Hint { x: root.margin + 170px * Palette.scale; y: 31px * Palette.scale; height: 24px * Palette.scale; text: "v0.8.8"; }
         if !root.mobile: Action { x: root.content-width - 90px * Palette.scale; y: 24px * Palette.scale; width: 28px * Palette.scale; height: 28px * Palette.scale; glyph: root.minimize-icon; flat: true; clicked => { root.minimize-window(); } }
         if !root.mobile: Action { x: root.content-width - 54px * Palette.scale; y: 24px * Palette.scale; width: 28px * Palette.scale; height: 28px * Palette.scale; glyph: root.close-icon; flat: true; clicked => { root.close-window(); } }
     }
-    // Open hero composition, exactly as the original 560 × 740 layout.
+    // Reserve a full row for connection types above the open hero composition.
     if root.page == 0: Rectangle {
+        connection-types := NavigationPill {
+            x: root.margin; y: 88px * Palette.scale;
+            width: root.content-width - 2 * root.margin; height: root.connection-strip-height;
+            private property <length> tab-width: min(104px * Palette.scale, (self.width - 48px * Palette.scale)/3);
+            mode-caption := Text { text: I18n.tr("Подписка"); font-size: 18px * Palette.scale; visible: false; }
+            HorizontalLayout {
+                padding-left: 12px * Palette.scale; padding-right: 12px * Palette.scale;
+                padding-top: 4px * Palette.scale; padding-bottom: 4px * Palette.scale;
+                spacing: (connection-types.width - 24px * Palette.scale - 3 * connection-types.tab-width)/2;
+                for title[index] in [I18n.tr("Свой VPS"), "P2P", I18n.tr("Подписка")]: Rectangle {
+                    min-width: connection-types.tab-width; max-width: connection-types.tab-width;
+                    private property <color> ink: root.connection-mode == index || mode-touch.has-hover ? Palette.teal : mode-focus.has-focus ? Palette.ink : Palette.muted;
+                    if mode-touch.has-hover: Surface {
+                        x: 2px * Palette.scale; y: 4px * Palette.scale;
+                        width: parent.width - 2 * self.x; height: parent.height - 2 * self.y;
+                        texture: 2; fill: Palette.raised;
+                    }
+                    Image {
+                        source: root.connection-icons[index];
+                        x: (parent.width - self.width)/2; y: (root.compact ? 10px : 18px) * Palette.scale;
+                        width: round(26.4 * Palette.scale) * 1px; height: self.width;
+                        image-rendering: pixelated; colorize: parent.ink;
+                    }
+                    Hint {
+                        text: title; y: (root.compact ? 36px : 44px) * Palette.scale;
+                        width: parent.width; height: 20px * Palette.scale;
+                        font-size: 18px * Palette.scale * min(1, (parent.width - 4px * Palette.scale) / mode-caption.preferred-width);
+                        horizontal-alignment: center; color: parent.ink;
+                    }
+                    mode-focus := FocusScope {
+                        enabled: !Interaction.blocked;
+                        key-pressed(event) => { if event.text == " " || event.text == "\n" { root.connection-mode = index; return accept; } return reject; }
+                        mode-touch := TouchArea { enabled: !Interaction.blocked; clicked => { parent.focus(); root.connection-mode = index; } }
+                    }
+                    accessible-role: tab; accessible-label: index == 2 ? I18n.tr("Подписка Mukhomor") : title;
+                    accessible-item-selected: root.connection-mode == index;
+                    accessible-action-default => { if !Interaction.blocked { root.connection-mode = index; } }
+                }
+            }
+        }
         hero := Rectangle {
-            x: (root.content-width - self.width)/2; y: (root.compact ? 88px : 96px) * Palette.scale;
-            width: 240px * Palette.scale; height: (root.compact ? 160px : 196px) * Palette.scale;
+            x: root.margin; y: root.hero-top;
+            width: root.content-width - 2 * root.margin; height: root.hero-status-top - self.y;
             // The shared artwork below moves here when preparation completes.
             Label {
-                y: parent.height - 40px * Palette.scale; height: 31px * Palette.scale;
+                y: root.hero-label-top - parent.y; height: (root.tight ? 26px : 32px) * Palette.scale;
                 width: parent.width; text: root.primary-text;
                 horizontal-alignment: center;
-                color: hero-touch.has-hover || hero-focus.has-focus ? Palette.teal : Palette.ink;
+                color: root.connection-action-enabled && (hero-touch.has-hover || hero-focus.has-focus) ? Palette.teal : Palette.ink;
             }
             hero-focus := FocusScope {
-                enabled: root.primary-enabled && root.dialog == 0;
+                enabled: root.connection-action-enabled && !Interaction.blocked;
                 key-pressed(event) => { if event.text == " " || event.text == "\n" { root.command("primary", "", ""); return accept; } return reject; }
             }
-            hero-touch := TouchArea { enabled: root.primary-enabled && root.dialog == 0; clicked => { hero-focus.focus(); root.command("primary", "", ""); } }
-            accessible-role: button; accessible-label: root.primary-text; accessible-description: root.status-text;
-            accessible-enabled: root.primary-enabled;
-            accessible-action-default => { if root.primary-enabled && root.dialog == 0 { root.command("primary", "", ""); } }
+            hero-touch := TouchArea { enabled: root.connection-action-enabled && !Interaction.blocked; clicked => { hero-focus.focus(); root.command("primary", "", ""); } }
+            accessible-role: button; accessible-label: root.primary-text; accessible-description: root.status-text + ". " + root.connection-hint;
+            accessible-enabled: root.connection-action-enabled;
+            accessible-action-default => { if root.connection-action-enabled && !Interaction.blocked { root.command("primary", "", ""); } }
         }
-        if root.notice != "": Hint {
-            x: root.margin; y: root.list-y - 64px * Palette.scale;
-            width: root.content-width - 2 * root.margin; height: 36px * Palette.scale;
-            text: root.notice; wrap: word-wrap; horizontal-alignment: center;
-            color: root.notice-error ? Palette.danger : Palette.muted;
+        Hint {
+            x: root.margin; y: root.hero-status-top; width: root.content-width - 2 * root.margin;
+            height: 20px * Palette.scale; horizontal-alignment: center;
+            text: root.status-text;
+            color: root.connection-attention || (root.connection-failed && root.phase != "connected") ? Palette.danger : root.phase == "connected" ? Palette.teal : Palette.ink;
         }
-        Hint { x: root.margin; y: root.list-y - 32px * Palette.scale; height: 20px * Palette.scale; text: I18n.tr("СЕРВЕРЫ") + " · " + root.profiles.length; }
-        if root.phase == "idle" && !root.busy && root.content-width >= 450px: Hint {
+        Hint {
+            visible: root.notice == "";
+            x: root.margin; y: root.hero-hint-top; width: root.content-width - 2 * root.margin;
+            height: root.hero-hint-height; font-size: (root.tight ? 14px : 16px) * Palette.scale;
+            text: root.connection-hint; wrap: word-wrap; horizontal-alignment: center; vertical-alignment: top;
+        }
+        if root.notice != "": Rectangle {
+            x: root.margin; y: root.hero-hint-top;
+            width: root.content-width - 2 * root.margin; height: root.hero-hint-height;
+            clip: true;
+            PageScroll {
+                width: parent.width - 36px * Palette.scale; height: parent.height;
+                scroll-inset: 4px * Palette.scale;
+                VerticalLayout {
+                    padding: 0px;
+                    Hint { text: root.notice; wrap: word-wrap; vertical-alignment: top; color: root.notice-error ? Palette.danger : Palette.muted; }
+                }
+            }
+            Action {
+                x: parent.width - self.width; width: 32px * Palette.scale; height: self.width;
+                glyph: root.close-icon; flat: true; accessible-label: I18n.tr("Закрыть сообщение");
+                clicked => { root.command("dismiss", "", ""); }
+            }
+        }
+        if root.connection-mode == 0: Hint { x: root.margin; y: root.list-y - 32px * Palette.scale; height: 20px * Palette.scale; text: I18n.tr("СЕРВЕРЫ") + " · " + root.profiles.length; }
+        if root.connection-mode == 0 && root.phase == "idle" && !root.busy && root.content-width >= 450px: Hint {
             x: root.content-width/2; y: root.list-y - 28px * Palette.scale;
             width: root.content-width/2-root.margin; height: 20px * Palette.scale;
             horizontal-alignment: right; text: I18n.tr("Выбери и подключись");
+        }
+        if root.connection-mode == 2: VerticalLayout {
+            x: root.margin; y: root.list-y;
+            width: root.content-width - 2 * root.margin;
+            height: max(80px * Palette.scale, root.footer - self.y);
+            alignment: center; spacing: 12px * Palette.scale;
+            Label { text: I18n.tr("Подписка Mukhomor"); horizontal-alignment: center; wrap: word-wrap; }
+            Hint { text: I18n.tr("В разработке"); color: Palette.muted; horizontal-alignment: center; wrap: word-wrap; }
+        }
+        if root.connection-mode == 1: Hint { x: root.margin; y: root.list-y - 32px * Palette.scale; height: 20px * Palette.scale; text: I18n.tr("СЕТИ") + " · " + root.p2p-networks.length; }
+        if root.connection-mode == 1: PageScroll {
+            x: root.margin; y: root.list-y;
+            width: root.content-width - 2 * root.margin;
+            height: max(root.row-height, (root.p2p-selected == "i2p" ? root.footer : root.actions-y) - 20px * Palette.scale - self.y);
+            enabled: root.dialog == 0;
+            VerticalLayout {
+                spacing: 10px * Palette.scale;
+                for network in root.p2p-networks: Rectangle {
+                    height: 52px * Palette.scale;
+                    Surface { texture: 2; fill: Palette.raised; outline: network-focus.has-focus ? 1px : 0px; stroke: Palette.teal; }
+                    Image { source: network.selected ? root.check-icon : root.arrow-icon; x: 12px * Palette.scale; y: 14px * Palette.scale; width: 24px * Palette.scale; height: self.width; colorize: network.selected ? Palette.teal : Palette.muted; image-rendering: pixelated; }
+                    Label { x: 48px * Palette.scale; y: 2px * Palette.scale; width: parent.width - self.x - 8px; height: 24px * Palette.scale; text: network.name; }
+                    Hint { x: 48px * Palette.scale; y: 27px * Palette.scale; width: parent.width - self.x - 8px; height: 20px * Palette.scale; text: network.id == "tor" ? I18n.tr("Интернет") + " · " + root.tor-method-label : I18n.tr("Только сеть I2P"); }
+                    network-focus := FocusScope {
+                        enabled: root.ready && !root.busy && !root.primary-stops-connection && root.dialog == 0;
+                        key-pressed(event) => { if event.text == " " || event.text == "\n" { root.command("p2p-select", network.id, ""); return accept; } return reject; }
+                        TouchArea { enabled: parent.enabled; clicked => { parent.focus(); root.command("p2p-select", network.id, ""); } }
+                    }
+                    accessible-role: list-item; accessible-label: network.name + ", " + (network.id == "tor" ? root.tor-method-label : I18n.tr("Только сеть I2P")); accessible-item-selected: network.selected;
+                }
+                if root.p2p-selected == "tor": Hint { text: I18n.tr("Выходной узел видит HTTP без шифрования. Используйте HTTPS."); wrap: word-wrap; }
+                if root.p2p-selected == "i2p": Hint { text: I18n.tr("Только сайты и сервисы .i2p. Обычный интернет блокируется."); wrap: word-wrap; }
+                Hint { text: I18n.tr("Бесплатная публичная сеть • без VPS"); wrap: word-wrap; }
+                Hint { text: I18n.tr("Только TCP. UDP блокируется."); wrap: word-wrap; }
+                if root.p2p-selected == "tor": Hint { text: I18n.tr("Tor не заменяет защиту Tor Browser."); wrap: word-wrap; }
+                if root.p2p-selected == "i2p": Hint { text: I18n.tr("Адреса .b32.i2p проверяются ключом назначения."); wrap: word-wrap; }
+                Hint { text: root.p2p-selected == "tor" ? (root.tor-method-label == "Snowflake · AMP" ? I18n.tr("Подключение AMP может занять до 8 минут.") : I18n.tr("Первое подключение — до 6 минут.")) : I18n.tr("Первое подключение I2P — до 8 минут."); wrap: word-wrap; }
+            }
+        }
+        if root.connection-mode == 1 && root.p2p-selected == "tor": Action {
+            x: root.margin; y: root.actions-y; width: root.content-width - 2 * root.margin; height: 42px * Palette.scale;
+            text: I18n.tr("Настройки Tor и мосты"); enabled: root.ready && !root.busy && !root.primary-stops-connection;
+            clicked => { root.command("tor-options", "", ""); }
         }
     }
     // This is the one original list surface. The scrollbar belongs to it and
     // always has its own internal lane, whether the list overflows or not.
     server-list := Rectangle {
-        visible: root.page == 0;
+        visible: root.page == 0 && root.connection-mode == 0;
         x: root.margin; y: root.list-y;
         width: root.content-width - 2 * root.margin;
         height: max(root.row-height, root.actions-y - 20px * Palette.scale - self.y);
@@ -640,12 +836,12 @@ export component AppWindow inherits Window {
                 }
                 protocol := Hint { visible: profile.protocol != "" && root.content-width >= 450px; text: profile.protocol; width: min(self.preferred-width,80px * Palette.scale); x: parent.width - 16px * Palette.scale - self.width; height: parent.height; }
                 row-focus := FocusScope {
-                    enabled: root.ready && !root.busy && root.dialog == 0;
+                    enabled: root.profile-selection-enabled && root.dialog == 0;
                     key-pressed(event) => {
                         if event.text == " " || event.text == "\n" { root.command("Select", profile.id, ""); return accept; }
                         return reject;
                     }
-                    TouchArea { enabled: root.ready && !root.busy && root.dialog == 0; clicked => { parent.focus(); root.command("Select", profile.id, ""); } }
+                    TouchArea { enabled: parent.enabled; clicked => { parent.focus(); root.command("Select", profile.id, ""); } }
                 }
                 accessible-role: list-item; accessible-label: profile.name + ", " + profile.protocol;
                 accessible-item-selected: profile.selected;
@@ -658,7 +854,7 @@ export component AppWindow inherits Window {
             enabled: root.dialog == 0;
         }
     }
-    if root.page == 0: HorizontalLayout {
+    if root.page == 0 && root.connection-mode == 0: HorizontalLayout {
         x: root.margin; y: root.actions-y; width: root.content-width - 2 * root.margin; height: 42px * Palette.scale; spacing: 8px;
         Action { text: "+ " + I18n.tr("Добавить конфигурацию"); text-size: root.content-width < 450px ? 18px : 24px * Palette.scale; primary: true; enabled: root.ready && !root.busy; clicked => { root.dialog = 1; } }
         if root.selected-id != "": Action {
@@ -758,7 +954,7 @@ export component AppWindow inherits Window {
         Hint { text: I18n.tr("Сохранить применит изменения во всех наборах."); wrap: word-wrap; height: 24px; }
     }
     if root.page == 3: PageScroll {
-        x: root.margin; y: 108px * Palette.scale; width: root.content-width - root.margin; height: root.content-height - 84px * Palette.scale - self.y;
+        x: root.margin; y: 108px * Palette.scale; width: root.content-width - root.margin; height: root.footer - self.y;
         gutter: root.margin;
         enabled: root.dialog == 0;
         VerticalLayout {
@@ -841,18 +1037,48 @@ export component AppWindow inherits Window {
         Hint { text: I18n.tr("Не сохранено"); color: Palette.teal; }
         Action { compact: true; text: I18n.tr("Сохранить"); enabled: root.ready && !root.busy; clicked => { root.command("ApplySettings", "", ""); } }
     }
-    navigation := HorizontalLayout {
-        y: root.content-height - 80px * Palette.scale; height: 80px * Palette.scale; width: root.content-width;
-        for title[index] in [I18n.tr("Подключение"), I18n.tr("Правила"), I18n.tr("Наборы"), I18n.tr("Настройки")]: Rectangle {
-            if tab-focus.has-focus: Surface { x: 8px; y: 6px; width: parent.width - 16px; height: parent.height - 12px; texture: 0; fill: Palette.background; stroke: Palette.teal; outline: 1px; }
-            Image { source: root.navigation-icons[index]; y: 14px * Palette.scale; x: (parent.width - self.width)/2; width: 24px * Palette.scale; height: self.width; image-rendering: pixelated; colorize: root.page == index ? Palette.teal : Palette.muted; }
-            Hint { text: title; y: 50px * Palette.scale; width: parent.width; height: 20px * Palette.scale; font-size: root.content-width < 450px ? 13px : 16px * Palette.scale; horizontal-alignment: center; color: root.page == index ? Palette.teal : Palette.muted; }
-            tab-focus := FocusScope {
-                enabled: root.dialog == 0;
-                key-pressed(event) => { if event.text == " " || event.text == "\n" { root.page = index; return accept; } return reject; }
-                TouchArea { enabled: root.dialog == 0; clicked => { parent.focus(); root.page = index; } }
+    navigation := NavigationPill {
+        private property <length> tab-width: min(80px * Palette.scale, (self.width - 48px * Palette.scale)/4);
+        width: root.content-width - 2 * root.margin;
+        height: 80px * Palette.scale;
+        x: root.margin;
+        y: root.content-height - self.height - 8px * Palette.scale;
+        // Fit the longest caption without widening the square-like tabs.
+        caption-measure := Text { text: I18n.tr("Подключение"); font-size: 14px * Palette.scale; visible: false; }
+        HorizontalLayout {
+            padding-left: 12px * Palette.scale; padding-right: 12px * Palette.scale;
+            padding-top: 4px * Palette.scale; padding-bottom: 4px * Palette.scale;
+            spacing: (navigation.width - 24px * Palette.scale - 4 * navigation.tab-width)/3;
+            for title[index] in [I18n.tr("Подключение"), I18n.tr("Правила"), I18n.tr("Наборы"), I18n.tr("Настройки")]: Rectangle {
+                min-width: navigation.tab-width; max-width: navigation.tab-width;
+                if tab-touch.has-hover: Surface {
+                    x: 2px * Palette.scale; y: 4px * Palette.scale;
+                    width: parent.width - 2 * self.x; height: parent.height - 2 * self.y;
+                    texture: 2; fill: Palette.raised;
+                }
+                Image {
+                    source: root.navigation-icons[index];
+                    // The mushroom has two empty rows in its 12px source grid.
+                    y: 16px * Palette.scale + (round(26.4 * Palette.scale) * 1px - self.height)/2;
+                    x: (parent.width - self.width)/2;
+                    width: round(26.4 * (index == 0 ? 1.2 : 1) * Palette.scale) * 1px; height: self.width;
+                    image-rendering: pixelated;
+                    colorize: root.page == index || tab-touch.has-hover ? Palette.teal : tab-focus.has-focus ? Palette.ink : Palette.muted;
+                }
+                Hint {
+                    text: title; y: 46px * Palette.scale;
+                    width: parent.width; height: 20px * Palette.scale;
+                    font-size: 14px * Palette.scale * min(1, (parent.width - 4px * Palette.scale) / caption-measure.preferred-width);
+                    horizontal-alignment: center;
+                    color: root.page == index || tab-touch.has-hover ? Palette.teal : tab-focus.has-focus ? Palette.ink : Palette.muted;
+                }
+                tab-focus := FocusScope {
+                    enabled: !Interaction.blocked;
+                    key-pressed(event) => { if event.text == " " || event.text == "\n" { root.page = index; return accept; } return reject; }
+                    tab-touch := TouchArea { enabled: !Interaction.blocked; clicked => { parent.focus(); root.page = index; } }
+                }
+                accessible-role: tab; accessible-label: title; accessible-item-selected: root.page == index;
             }
-            accessible-role: tab; accessible-label: title; accessible-item-selected: root.page == index;
         }
     }
     if root.dialog > 0: Rectangle {
@@ -867,7 +1093,7 @@ export component AppWindow inherits Window {
                 padding: 18px; spacing: 12px;
                 HorizontalLayout {
                     spacing: 12px * Palette.scale;
-                    Label { text: root.dialog == 1 ? I18n.tr("Добавить конфигурацию") : root.dialog <= 3 ? I18n.tr("Сервер") : root.dialog <= 6 ? I18n.tr("Набор правил") : root.dialog == 7 ? I18n.tr("Результаты проверки") : root.dialog == 8 ? I18n.tr("О приложении") : root.dialog == 10 || root.dialog == 11 ? I18n.tr("Параметры") : I18n.tr("Несохранённые изменения"); font-size: 24px * Palette.scale; wrap: word-wrap; min-width: 0px; horizontal-stretch: 1; }
+                    Label { text: root.dialog == 12 ? I18n.tr("Настройки Tor и мосты") : root.dialog == 1 ? I18n.tr("Добавить конфигурацию") : root.dialog <= 3 ? I18n.tr("Сервер") : root.dialog <= 6 ? I18n.tr("Набор правил") : root.dialog == 7 ? I18n.tr("Результаты проверки") : root.dialog == 8 ? I18n.tr("О приложении") : root.dialog == 10 || root.dialog == 11 ? I18n.tr("Параметры") : I18n.tr("Несохранённые изменения"); font-size: 24px * Palette.scale; wrap: word-wrap; min-width: 0px; horizontal-stretch: 1; }
                     ModalAction {
                         glyph: root.close-icon; glyph-size: 8px * max(1,round(4 * Palette.scale)); glyph-color: Palette.ink;
                         width: 48px * Palette.scale; height: self.width; flat: true;
@@ -918,7 +1144,7 @@ export component AppWindow inherits Window {
                 if root.dialog == 7: Editor { text: root.rule-issues; read-only: true; wrap: word-wrap; vertical-stretch: 1; }
                 if root.dialog == 8: VerticalLayout {
                     spacing: 16px;
-                    Label { text: "Mukhomor 0.8.0"; font-size: 25px; }
+                    Label { text: "Mukhomor 0.8.8"; font-size: 25px; }
                     Label { text: "Slint 1.18.1"; color: Palette.muted; }
                     AboutSlint {}
                     Rectangle { vertical-stretch: 1; }
@@ -935,6 +1161,23 @@ export component AppWindow inherits Window {
                 Toggle { modal: true; enabled: true;  text: I18n.tr("Игры"); checked <=> root.source-games; toggled => { root.command("sources", "", ""); } }
             }
 
+                }
+                if root.dialog == 12: VerticalLayout {
+                    spacing: 10px * Palette.scale;
+                    Choice { model: [I18n.tr("Без мостов"), "obfs4", "WebTunnel", "Snowflake · CDN77", "Snowflake · AMP"]; current-index <=> root.tor-method; enabled: !root.busy; }
+                    Hint { text: root.tor-method == 0 ? I18n.tr("При блокировке Tor выберите Snowflake или свежие мосты WebTunnel / obfs4.") : root.tor-method >= 3 ? I18n.tr("Готовый пресет: адреса и аккаунт не нужны. Если CDN77 недоступен, попробуйте AMP, и наоборот.") : I18n.tr("Получите бесплатные мосты Tor Project и вставьте строки ниже. Аккаунт Tor не нужен."); wrap: word-wrap; }
+                    if root.tor-method == 1 || root.tor-method == 2: HorizontalLayout {
+                        spacing: 8px;
+                        ModalAction { text: I18n.tr("Сайт Tor"); enabled: !root.busy; clicked => { root.command("tor-bridge-website", "", ""); } }
+                        ModalAction { text: "Telegram"; enabled: !root.busy; clicked => { root.command("tor-bridge-bot", "", ""); } }
+                    }
+                    if root.tor-method == 1 || root.tor-method == 2: Hint { text: I18n.tr("На сайте выберите тип моста и решите капчу. В Telegram: /obfs4 или /webtunnel. Вставьте одну строку на мост."); wrap: word-wrap; }
+                    if root.tor-method == 1 || root.tor-method == 2: Editor { text <=> root.tor-bridges; read-only: root.busy; vertical-stretch: 1; min-height: 90px; wrap: word-wrap; }
+                    if root.tor-method >= 3: Hint { text: I18n.tr("Snowflake использует UDP только для связи с мостом."); wrap: word-wrap; }
+                    if root.tor-method == 4: Hint { text: I18n.tr("Подключение AMP может занять до 8 минут."); wrap: word-wrap; }
+                    Hint { text: I18n.tr("При отказе моста прямое подключение не включается."); wrap: word-wrap; }
+                    if root.tor-method == 0 || root.tor-method >= 3: Rectangle { vertical-stretch: 1; }
+                    ModalAction { text: I18n.tr("Сохранить"); primary: true; enabled: root.ready && !root.busy; clicked => { root.command("ConfigureTor", "", ""); } }
                 }
                 if root.dialog == 11: VerticalLayout {
                     spacing: 12px;
@@ -956,10 +1199,10 @@ export component AppWindow inherits Window {
     ConnectionArtwork {
         source: root.show-roots && !root.boot-active ? root.hero-connected-image : root.hero-image;
         visible: root.boot-active || (root.page == 0 && root.dialog == 0);
-        height: root.boot-active ? min(216px * Palette.scale, root.content-width * 0.6) : (root.compact ? 108px : 144px) * Palette.scale;
+        height: root.boot-active ? min(216px * Palette.scale, root.content-width * 0.6) : root.hero-art-height;
         width: self.height * 80 / 72;
         x: (root.content-width - self.width)/2;
-        y: root.boot-active ? (root.content-height - self.height)/2 - (root.boot-error == "" ? 24px : 96px) * min(Palette.scale, 1) : (root.compact ? 96px : 104px) * Palette.scale;
+        y: root.boot-active ? (root.content-height - self.height)/2 - (root.boot-error == "" ? 24px : 96px) * min(Palette.scale, 1) : root.hero-top;
         animate y, height { duration: root.animation && root.effects ? 320ms : 0ms; easing: ease-in-out; }
         accessible-label: root.boot-active ? root.boot-status : root.status-text;
     }

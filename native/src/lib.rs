@@ -5,6 +5,7 @@ use mukhomor_ui::visuals::appearance;
 mod design;
 #[cfg(not(windows))]
 mod i18n;
+mod tor_options;
 #[cfg(not(windows))]
 mod presets;
 #[cfg(not(windows))]

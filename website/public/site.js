@@ -89,7 +89,7 @@
     });
   }
   const motionButtons = [...document.querySelectorAll('.motion-toggle')];
-  if (motionButtons.length) {
+  {
     const preference = matchMedia('(prefers-reduced-motion: reduce)');
     let saved = null;
     try { saved = localStorage.getItem('mukhomor-site-motion'); } catch { /* Storage is optional. */ }
@@ -111,17 +111,6 @@
       try { localStorage.setItem('mukhomor-site-motion', saved); } catch { /* Storage is optional. */ }
     }));
     preference.addEventListener('change', event => { paused = event.matches || saved === 'paused'; renderMotion(); });
-  }
-  const dialog = document.querySelector('.preview-dialog');
-  const previewTrigger = document.querySelector('[data-open-preview]');
-  if (dialog && previewTrigger && typeof dialog.showModal === 'function') {
-    previewTrigger.hidden = false;
-    previewTrigger.addEventListener('click', () => dialog.showModal());
-    dialog.querySelector('[data-close-preview]').addEventListener('click', () => dialog.close());
-    dialog.addEventListener('click', event => {
-      const bounds = dialog.getBoundingClientRect();
-      if (event.target === dialog && (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom)) dialog.close();
-    });
   }
   const sections = [...document.querySelectorAll('.doc-section')];
   if (sections.length) {

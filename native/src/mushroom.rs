@@ -1,7 +1,6 @@
-// Compact logo 04 and its stepped mycelium button; only four bottom tips soften.
-// One silhouette in every theme. R = primary, W = secondary, S = stem.
+// Approved full and optical mini artwork; colors follow every application theme.
 // Kept independent of Win32 so the EXE resource and runtime icons share pixels.
-pub const PALETTE_LEN: usize = 14;
+include!("mushroom_data.rs");
 
 pub const fn palette_index(pixel: u8) -> Option<usize> {
     match pixel {
@@ -31,6 +30,7 @@ fn mix(first: u32, second: u32, percent: u32) -> u32 {
         color | ((a * (100 - percent) + b * percent + 50) / 100) << shift
     })
 }
+/// Live theme colors use Windows COLORREF order (R in the low byte).
 pub fn palette(
     bg: u32,
     primary: u32,
@@ -38,7 +38,8 @@ pub fn palette(
     stem: u32,
     light: bool,
 ) -> [u32; PALETTE_LEN] {
-    [
+    let mut colors = [0; PALETTE_LEN];
+    colors[..14].copy_from_slice(&[
         primary,
         mix(primary, 0xffffff, 24),
         mix(primary, bg, 16),
@@ -53,163 +54,60 @@ pub fn palette(
         mix(secondary, stem, 46),
         mix(secondary, bg, if light { 17 } else { 35 }),
         mix(secondary, stem, 70),
-    ]
+    ]);
+    for (i, &(reference, family)) in APPROVED_COLORS.iter().enumerate() {
+        colors[14 + i] = retint(reference, [0xb952ff, 0xd1f516, 0xf4fff3][family], [primary, secondary, stem][family]);
+    }
+    colors
 }
 
-pub const LOGO_WIDTH: usize = 24;
-pub const LOGO_HEIGHT: usize = 24;
-pub const MINI: [&[u8; LOGO_WIDTH]; LOGO_HEIGHT] = [
-    b"........................",
-    b"........................",
-    b"........................",
-    b"........................",
-    b".........RRRRRR.........",
-    b".......RRRRRRRRRR.......",
-    b".....RRWWWRRRRRRRRR.....",
-    b"....RRRWWWRRRRRRRRRR....",
-    b"...RRRRRRRRRWWWWWRRRR...",
-    b"...RWWWRRRRRWWWWWRRRR...",
-    b"...RWWWRRRRRWWWWRRRRR...",
-    b"...RRRRRRRRRRRRRRRRRR...",
-    b".........SSSSSS.........",
-    b".........SSSSSS.........",
-    b".........SSSSSS.........",
-    b"........SSSSSSSS........",
-    b".......SSSSSSSSSS.......",
-    b".......SSSSSSSSSS.......",
-    b"........................",
-    b"........................",
-    b"........................",
-    b"........................",
-    b"........................",
-    b"........................",
-];
-
-pub const HERO_WIDTH: usize = 80;
-pub const HERO_HEIGHT: usize = 72;
-// Bounds (left, top, width, height) identify the three independently animated
-// spots in HERO. All treads are square; only four bottom tips lose one pixel.
-pub const HERO_SPOTS: [(usize, usize, usize, usize); 3] =
-    [(28, 10, 8, 6), (20, 18, 8, 6), (41, 15, 12, 8)];
-pub fn hero_spot(row: usize, col: usize) -> Option<usize> {
-    HERO_SPOTS.iter().position(|&(left, top, width, height)| {
-        (left..left + width).contains(&col) && (top..top + height).contains(&row)
+// Preserve the approved Neon pixels exactly. Other themes replace each material
+// color while keeping its light, shadow and small tonal variations.
+fn retint(reference: u32, base: u32, themed: u32) -> u32 {
+    [0, 8, 16].into_iter().fold(0, |color, shift| {
+        let r = (reference >> shift) & 255;
+        let b = (base >> shift) & 255;
+        let t = (themed >> shift) & 255;
+        let value = if r <= b { (t * r + b / 2) / b.max(1) } else { t + ((255 - t) * (r - b) + (255 - b) / 2) / (255 - b).max(1) };
+        color | value << shift
     })
 }
-pub const HERO: [&[u8; HERO_WIDTH]; HERO_HEIGHT] = [
-    b"................................................................................",
-    b"................................................................................",
-    b"................................................................................",
-    b"................................................................................",
-    b"................................................................................",
-    b"................................................................................",
-    b"...............................HHHHHHHHHHHHHHHHRR...............................",
-    b"...............................HHHHHHHHHHHHHHHHRR...............................",
-    b"...............................HHHHHHHHHHHHHHHHRR...............................",
-    b".........................HHHHHHRRRRRRRRRRRRRRRRRRRRRRRR.........................",
-    b".........................RHHHVVVVVVHRRRRRRRRRRRRRRRRRRR.........................",
-    b".........................RRRWWWWWWWWRRRRRRRRRRRRRRRRRRR.........................",
-    b"...................HHHHHHRRRWWWWWWWWRRRRRRRRRRRRRRRRRRRRRRRRR...................",
-    b"...................RRRRRRRRRWWWWWWWWRRRRRRRRRRRRRRRRRRRRRRRRR...................",
-    b"...................RRHHHRRRRWWWWWWWWRRRRRRRRRRRRRRRRRRRRRRRRR...................",
-    b"................HHHRRHHHRRRRRQQQQQQRRRRRRRVVVVVVVVVVRRRRRRRRRREE................",
-    b"................RRRRRRRRRRRRRRRRRRRRRRRRRWWWWWWWWWWWWRRRRRRRRREE................",
-    b"................RRRRRRRRRRRRRRRRRRRRRRRRRWWWWWWWWWWWWRRRRRRRRREE................",
-    b".............HHHRHHRRVVVVVVRRRRRRRRRRRRRRWWWWWWWWWWWWRRRRRRRRREEEEE.............",
-    b".............RRRRHHRWWWWWWWWRRRRRRRRRRRRRWWWWWWWWWWWWRRRRRRRRREEEEE.............",
-    b".............RRRRHHRWWWWWWWWRRRRRRRRRRRRRWWWWWWWWWWWWRRRRRRRRREEEEE.............",
-    b".............RRRRRRRWWWWWWWWRRRRRRRRRRRRRWWWWWWWWWWWWRRRRRRRRREEEEE.............",
-    b".............RRRRRRRWWWWWWWWRRRRRRRRRRRRRRQQQQQQQQQQRRRRRRRRRREEEEE.............",
-    b".............RRRRRRRRQQQQQQRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRREEEEE.............",
-    b".............RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRREEEEE.............",
-    b".............RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRREEEEE.............",
-    b".............EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE.............",
-    b".............EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE.............",
-    b".............DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD.............",
-    b"..............DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD..............",
-    b"...............................AAAAAAAAAAAAAAAAAA...............................",
-    b"...............................LSSSSSSSSSSSSSSSAA...............................",
-    b"...............................LSSSSSSSSSSSSSSSAA...............................",
-    b"...............................LSSSSSSSSSSSSSSSAA...............................",
-    b"...............................LSSSSSSSSSSSSSSSAA...............................",
-    b"...............................LSLLSSSSSSSSSSSSAA...............................",
-    b"...............................LSLLSSSSSSSSSSSSAA...............................",
-    b"...............................LSLLSSSSSSSSSSSSAA...............................",
-    b"...............................LSLLSSSSSSSSSSSSAA...............................",
-    b"............................LSSSSLLSSSSSSSSSSSSAAAAA............................",
-    b"............................LSSSSLLSSSSSSSSSSSSAAAAA............................",
-    b"............................LSSSSLLSSSSSSSSSSSSAAAAA............................",
-    b".........................LSSSSSSSLLSSSSSSSSSSSSAAAAAAAA.........................",
-    b".........................LSSSSSSSSSSSSSSSSSSSSSAAAAAAAA.........................",
-    b".........................LSSSSSSSSSSSLLLLLLSSSSAAAAAAAA.........................",
-    b".........................LSSSSSSSSSSSSSSSSSSSSSAAAAAAAA.........................",
-    b".........................LBBBBBBBBBBBBBBBBBBBBBAAAAAAAA.........................",
-    b"..........................BBBBBBBBBBBBBBBBBBBBBAAAAAAA..........................",
-    b"............................JJJ..JJ.....JJ...M..JJJ.............................",
-    b"..........................MMJJ...J......JJ...MM.JJJM...NNNNN....................",
-    b"...............NNNNN....MMM.JJ...J......JJ....M..JJMNNNN...NNN..NNNNN...........",
-    b".............NNN...NNNNNM.......MM......JJ....M......M.......NNNN...NNN.........",
-    b"........NNNNNN.......MM.........M........M....M......MM...............N.........",
-    b"....................MM.........MM........MM...MM......MM........................",
-    b".................MMMM........NNN..........M....M.......NMMM.....................",
-    b"..............MNMM.........NNN.M..........M....MM.....NN..MMMM..................",
-    b".............MMN..........NN...M.........MM.....M.....N......MM.................",
-    b"............MM.NN........NN....M.........M......M....NN.......MM................",
-    b"......MMMMMMM...N........N.....M........NN.....MM....NN........NMMM.............",
-    b"................N.......NN....MNN.....NNNMM....M......N........N..MMM...........",
-    b"...............NN....NNNN...MMM.NNN...N...M...NN......NN......NN................",
-    b".............NNN....NN.....MM.....NN..N...MM.NNMM......N......N.................",
-    b"............NN............MM.......N.NN....MNN..M......N......NNN...............",
-    b"............N.............M........N.N.....MN...MM....NN........NNN.............",
-    b".........................MM........N.N....MM.....M....N...........N.............",
-    b".........................M.........N......M.....MM....N.........................",
-    b"...................................N......M.....M...............................",
-    b"..........................................M.....M...............................",
-    b"................................................................................",
-    b"................................................................................",
-    b"................................................................................",
-    b"................................................................................",
-];
 
-// UI artwork includes layout padding. Windows supplies its own spacing around
-// taskbar, tray and shortcut icons, so only the visible mark belongs in the DIB.
-// Fit its bounds to the full square canvas; nearest sampling keeps the pixel
-// edges and the three color regions crisp even at 16px.
-const ICON_BOUNDS: (usize, usize, usize, usize) = {
-    let (mut left, mut top, mut right, mut bottom) = (LOGO_WIDTH, LOGO_HEIGHT, 0, 0);
-    let mut y = 0;
-    while y < LOGO_HEIGHT {
-        let mut x = 0;
-        while x < LOGO_WIDTH {
-            if MINI[y][x] != b'.' {
-                if x < left {
-                    left = x;
-                }
-                if y < top {
-                    top = y;
-                }
-                if x + 1 > right {
-                    right = x + 1;
-                }
-                if y + 1 > bottom {
-                    bottom = y + 1;
-                }
-            }
-            x += 1;
-        }
-        y += 1;
-    }
-    (left, top, right - left, bottom - top)
-};
+/// Executable resources use RGB integers; the live UI uses COLORREF integers.
+/// Convert at this boundary so the approved shades are identical in both.
+pub fn rgb_palette(bg: u32, primary: u32, secondary: u32, stem: u32, light: bool) -> [u32; PALETTE_LEN] {
+    let swap = |c: u32| (c & 255) << 16 | (c & 0xff00) | (c >> 16);
+    palette(swap(bg), swap(primary), swap(secondary), swap(stem), light).map(swap)
+}
 
-/// Sample the visible mark without the layout padding used inside the window.
-/// Shared by executable resources and the Slint taskbar/tray image.
+pub fn hero_spot(row: usize, col: usize) -> Option<usize> {
+    if !matches!(*HERO.get(row)?.get(col)?, b'W' | b'V' | b'Q') { return None; }
+    HERO_SPOTS.iter().position(|&(left, top, width, height)| {
+        (left..left + width).contains(&col) && (top..top + height).contains(&row)
+    }).or_else(|| HERO_SPOTS.iter().enumerate().min_by_key(|&(_, &(left, top, width, height))| {
+        (col * 2).abs_diff(left * 2 + width) + (row * 2).abs_diff(top * 2 + height)
+    }).map(|(index, _)| index))
+}
+
+pub fn hero_palette_index(row: usize, col: usize) -> Option<usize> {
+    tone_index(HERO_TONES[row][col])
+}
+pub const fn tone_index(tone: u8) -> Option<usize> {
+    if tone == 255 { None } else { Some(tone as usize) }
+}
+
+// Optically drawn 16/24/32px versions keep clear spot gaps and intentional
+// padding; larger system icons use exact integer multiples when possible.
 pub fn icon_palette_index(x: usize, y: usize, size: usize) -> Option<usize> {
     assert!((1..=256).contains(&size) && x < size && y < size);
-    let (left, top, width, height) = ICON_BOUNDS;
-    palette_index(
-        MINI[top + (2 * y + 1) * height / (2 * size)][left + (2 * x + 1) * width / (2 * size)],
-    )
+    let tone = if size <= 20 {
+        MICRO_TONES[(2 * y + 1) * 16 / (2 * size)][(2 * x + 1) * 16 / (2 * size)]
+    } else if size == 24 || size == 48 || size == 96 {
+        COMPACT_TONES[(2 * y + 1) * 24 / (2 * size)][(2 * x + 1) * 24 / (2 * size)]
+    } else {
+        MINI_TONES[(2 * y + 1) * 32 / (2 * size)][(2 * x + 1) * 32 / (2 * size)]
+    };
+    tone_index(tone)
 }
 
 // A 32-bit icon resource DIB, including its Windows transparency mask.
@@ -291,11 +189,11 @@ mod tests {
         };
         assert_eq!(
             fingerprint(MINI.iter().map(|row| &row[..]).collect()),
-            0x29d2d62f8b93e62f
+            0x5302d2c1b083e085
         );
         assert_eq!(
             fingerprint(HERO.iter().map(|row| &row[..]).collect()),
-            0x82011c1516184bd4
+            0x90827ecdbfa06661
         );
     }
 
@@ -313,7 +211,25 @@ mod tests {
     }
 
     #[test]
-    fn all_native_icon_sizes_fill_the_canvas_with_three_colors_and_a_matching_alpha_mask() {
+    fn approved_tonal_pixels_are_exact_in_neon_and_follow_other_themes() {
+        let neon = palette(0x1b0d16, 0xb952ff, 0xd1f516, 0xf4fff3, false);
+        let resource = rgb_palette(0x160d1b, 0xff52b9, 0x16f5d1, 0xf3fff4, false);
+        let themed = palette(0x111c18, 0xef9273, 0xb5d58f, 0xf2e9d5, false);
+        for (i, &(reference, _)) in APPROVED_COLORS.iter().enumerate() {
+            assert_eq!(neon[14 + i], reference);
+            assert_eq!(resource[14 + i], (reference & 255) << 16 | (reference & 0xff00) | (reference >> 16));
+            assert_ne!(themed[14 + i], reference);
+        }
+        for y in 0..HERO_HEIGHT {
+            for x in 0..HERO_WIDTH {
+                assert_eq!(hero_palette_index(y,x).is_none(), HERO[y][x] == b'.');
+                if let Some(index) = hero_palette_index(y,x) { assert!(index < PALETTE_LEN); }
+            }
+        }
+    }
+
+    #[test]
+    fn optical_icon_sizes_preserve_materials_and_a_matching_alpha_mask() {
         let colors = palette(0x111c18, 0xef9273, 0xb5d58f, 0xf2e9d5, false);
         for size in [16usize, 20, 24, 32, 40, 48, 64, 96, 128, 256] {
             let dib = icon_dib(size, &colors);
@@ -335,22 +251,15 @@ mod tests {
                         bottom = bottom.max(y + 1);
                         let rgb =
                             dib[i] as u32 | (dib[i + 1] as u32) << 8 | (dib[i + 2] as u32) << 16;
-                        let index = [colors[0], colors[4], colors[7]]
-                            .iter()
-                            .position(|&c| c == rgb)
-                            .unwrap();
+                        assert!(colors.contains(&rgb));
+                        let index = if rgb & 255 > (rgb >> 8) & 255 { 0 } else if (rgb & 255) < 150 { 1 } else { 2 };
                         counts[index] += 1;
                     }
                 }
             }
-            assert!(counts.into_iter().all(|count| count >= 3), "size {size}");
-            assert_eq!(
-                (left, top, right, bottom),
-                (0, 0, size, size),
-                "size {size}"
-            );
-            // Transparent corners retain the mushroom silhouette, even though
-            // its extremities now reach every edge of the system icon canvas.
+            assert!(counts.into_iter().sum::<usize>() > size * size / 4, "size {size}");
+            assert!(right - left >= size * 3 / 4 && bottom - top >= size * 3 / 4, "size {size}");
+            // Intentional padding and transparent corners protect the silhouette.
             for (x, y) in [(0, 0), (size - 1, 0), (0, size - 1), (size - 1, size - 1)] {
                 assert_eq!(dib[40 + (y * size + x) * 4 + 3], 0, "size {size}");
             }
@@ -374,19 +283,22 @@ pub fn caption_grid(close: bool) -> &'static [&'static str; 8] {
 }
 
 pub fn icon_grid(kind: usize) -> &'static [&'static str; 12] {
-    const GRIDS: [[&str; 12]; 9] = [
+    if kind == 0 { return &NAV_LOGO; }
+    const GRIDS: [[&str; 12]; 11] = [
+        // The logo's broad stepped cap, three spots and flared stem, reduced
+        // to the same monochrome 12px grid as the other navigation glyphs.
         [
             "............",
-            ".....XX.....",
             "....XXXX....",
-            "...XX..XX...",
-            "..XX....XX..",
-            ".XX......XX.",
-            "..X......X..",
-            "..X..XX..X..",
-            "..X..XX..X..",
-            "..X..XX..X..",
             "..XXXXXXXX..",
+            ".XX..XXXXXX.",
+            "XXX..XX..XXX",
+            "X..XXXX..XXX",
+            "XXXXXXXXXXXX",
+            "....X..X....",
+            "....X..X....",
+            "...XX..XX...",
+            "...XXXXXX...",
             "............",
         ],
         [
@@ -500,6 +412,36 @@ pub fn icon_grid(kind: usize) -> &'static [&'static str; 12] {
             ".......XX...",
             "......XX....",
             "............",
+        ],
+        // Own VPS: two rack units with indicator lights.
+        [
+            "............",
+            ".XXXXXXXXXX.",
+            ".X........X.",
+            ".X.XX..XX.X.",
+            ".X........X.",
+            ".XXXXXXXXXX.",
+            "............",
+            ".XXXXXXXXXX.",
+            ".X........X.",
+            ".X.XX..XX.X.",
+            ".X........X.",
+            ".XXXXXXXXXX.",
+        ],
+        // P2P: equal peers joined directly, without a central server.
+        [
+            "............",
+            "XXXX........",
+            "X..X........",
+            "X..X........",
+            "XXXX........",
+            "..XX........",
+            "..XXXXXXXX..",
+            "........XX..",
+            "........XXXX",
+            "........X..X",
+            "........X..X",
+            "........XXXX",
         ],
     ];
     &GRIDS[kind.min(GRIDS.len() - 1)]

@@ -28,11 +28,11 @@
         for(const file of release.files) {
           const link=make('a',undefined,'button button-primary release-file');
           const platform=/windows/i.test(file.name)?'для Windows':/android|\.apk$/i.test(file.name)?'для Android':/linux|\.deb$|\.rpm$|\.AppImage$/i.test(file.name)?'для Linux':'файл';
-          const expected=`https://github.com/0nionow1/Mukhomor/releases/download/v${release.version}/`;
+          const expected=`https://github.com/Mukhomo/Mukhomor/releases/download/v${release.version}/`;
           if(file.url===expected+file.name && /^[A-Za-z0-9._-]+$/.test(file.name)){link.href=file.url;link.dataset.analytics='download';}else link.setAttribute('aria-disabled','true');
           link.append(make('span','Скачать '+platform),make('small',(file.size/1048576).toFixed(1)+' МБ'));files.append(link);
         }
-        const source=make('a','Файлы и SHA256 на GitHub ↗','text-link release-source');source.href='https://github.com/0nionow1/Mukhomor/releases/tag/v'+encodeURIComponent(release.version);source.target='_blank';source.rel='noopener noreferrer';
+        const source=make('a','Файлы и SHA256 на GitHub ↗','text-link release-source');source.href='https://github.com/Mukhomo/Mukhomor/releases/tag/v'+encodeURIComponent(release.version);source.target='_blank';source.rel='noopener noreferrer';
         body.append(files,source);card.append(meta,body);fragment.append(card);
       }
       if(!ordered.length)fragment.append(make('p','Доступных версий пока нет.'));
@@ -46,7 +46,7 @@
           const article=make('article',undefined,'release-entry'),meta=make('div',undefined,'release-meta'),notes=make('div',undefined,'release-notes'),list=make('ul');article.id='v'+release.version;
           const heading=make('h2'),anchor=make('a',release.version),time=make('time',date(release.publishedAt));anchor.href='#v'+release.version;heading.id='v'+release.version+'-title';heading.append(anchor);article.setAttribute('aria-labelledby',heading.id);time.dateTime=release.publishedAt;
           meta.append(make('span',release.status==='stable'?'Stable':'В проверке','status '+(release.status==='stable'?'available-status':'development-status')),heading,time);
-          const source=make('a','Релиз на GitHub ↗','text-link release-source');source.href='https://github.com/0nionow1/Mukhomor/releases/tag/v'+encodeURIComponent(release.version);source.target='_blank';source.rel='noopener noreferrer';
+          const source=make('a','Релиз на GitHub ↗','text-link release-source');source.href='https://github.com/Mukhomo/Mukhomor/releases/tag/v'+encodeURIComponent(release.version);source.target='_blank';source.rel='noopener noreferrer';
           release.changes.forEach(change=>list.append(make('li',change)));notes.append(make('h3',release.title),list,source);article.append(meta,notes);history.append(article);
         }
       }

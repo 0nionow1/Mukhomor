@@ -11,7 +11,7 @@ $graphics=[Drawing.Graphics]::FromImage($bitmap)
 $graphics.SmoothingMode=[Drawing.Drawing2D.SmoothingMode]::None
 $graphics.Clear([Drawing.ColorTranslator]::FromHtml('#120c18'))
 $svg=New-Object Text.StringBuilder
-[void]$svg.Append('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" role="img" aria-label="Мухомор 0.8.1 — Windows, Linux, Android. Rust и Slint."><rect width="1280" height="640" fill="#120c18"/>')
+[void]$svg.Append('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" role="img" aria-label="Мухомор — Windows, Linux, Android. Rust и Slint."><rect width="1280" height="640" fill="#120c18"/>')
 function Rect([float]$X,[float]$Y,[float]$W,[float]$H,[string]$Color){
     $brush=New-Object Drawing.SolidBrush([Drawing.ColorTranslator]::FromHtml($Color))
     try{$graphics.FillRectangle($brush,$X,$Y,$W,$H)}finally{$brush.Dispose()}
@@ -52,17 +52,19 @@ foreach($item in $art.svg.path){
     }
 }
 foreach($r in @(@(64,508,432,4),@(496,504,16,4),@(512,500,16,4),@(528,504,16,4),@(544,508,244,4),@(788,512,16,4),@(804,516,16,4),@(820,520,396,4),@(212,512,4,16),@(196,528,20,4),@(196,532,4,12),@(680,512,4,20),@(664,532,20,4),@(1128,524,4,12),@(1132,536,20,4))){Rect $r[0] $r[1] $r[2] $r[3] '#6c3c71'}
-Label '0.8.1 / RUST + SLINT / OPEN SOURCE' 64 556 26 '#16f5d1'
+Label 'RUST + SLINT / OPEN SOURCE' 64 556 26 '#16f5d1'
 [void]$svg.Append('</svg>')
 try{
     [IO.File]::WriteAllText((Join-Path $root 'assets\github-banner.svg'),$svg.ToString()+"`n",(New-Object Text.UTF8Encoding($false)))
     $bitmap.Save((Join-Path $root 'assets\github-social-preview.png'),[Drawing.Imaging.ImageFormat]::Png)
 }finally{$graphics.Dispose();$bitmap.Dispose();$fonts.Dispose()}
 Copy-Item -LiteralPath (Join-Path $root 'assets\github-social-preview.png') -Destination (Join-Path $root 'website\public\assets\social-preview.png') -Force
-$preview=Join-Path $root 'target\public-release-preview'
+$preview=Join-Path $root 'target\website-screenshots'
 Copy-Item -LiteralPath (Join-Path $preview 'connection-reference.png') -Destination (Join-Path $root 'assets\preview.png') -Force
 Copy-Item -LiteralPath (Join-Path $preview 'connection-reference.png') -Destination (Join-Path $root 'website\public\assets\app-preview.png') -Force
-$sheet=New-Object Drawing.Bitmap(1712,740)
+$firstFrame=[Drawing.Image]::FromFile((Join-Path $preview 'connection-reference.png'))
+try{$frameHeight=$firstFrame.Height}finally{$firstFrame.Dispose()}
+$sheet=New-Object Drawing.Bitmap(1712,$frameHeight)
 $drawing=[Drawing.Graphics]::FromImage($sheet)
 $drawing.Clear([Drawing.ColorTranslator]::FromHtml('#120c18'))
 try{

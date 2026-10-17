@@ -58,6 +58,9 @@ for (const [name, [fill, line, shade]] of Object.entries(palettes)) {
   }
 }
 const root = '#694456', tip = '#422d3d';
+// Same nine-slice geometry as action buttons, with no surface fill anywhere.
+const pulseSides = [0,90,180,270].map(angle => `<g transform="rotate(${angle} 24 24)">${smallEdge('#16f5d1', '#397d6e')}${smallCorner('#16f5d1', '#397d6e')}</g>`).join('');
+await writeFile(new URL('pixel-frame-pulse-compact.svg', assets), `<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 48 48" shape-rendering="crispEdges">${pulseSides}</svg>\n`);
 // Exact top-edge mask for a short signal on the recommended release frame.
 await writeFile(new URL('pixel-frame-edge-mask.svg', assets), `<svg xmlns="http://www.w3.org/2000/svg" width="272" height="24" viewBox="6 0 68 6" shape-rendering="crispEdges">${edge('#fff', '#fff')}</svg>\n`);
 const rule = strand([[-1,6],[6,6],[12,4],[18,3],[25,5],[32,6],[41,5],[48,7],[55,8],[62,6],[68,5],[74,6],[80,6]], root) +

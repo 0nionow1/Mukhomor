@@ -104,8 +104,8 @@ test('static release catalog keeps downloads available without the content API a
   assert.ok(!html.includes('aria-disabled="true"'));
 });
 test('GitHub importer fixes upstream host and rejects draft, redirected, oversized and foreign files',async()=>{
-  const data={tag_name:'v0.8.0',published_at:'2026-10-15T12:00:00Z',draft:false,prerelease:true,assets:[{name:'Mukhomor-0.8.0-android.apk',browser_download_url:'https://github.com/0nionow1/Mukhomor/releases/download/v0.8.0/Mukhomor-0.8.0-android.apk',size:100}]};
-  const mock=async(url,options)=>{assert.equal(url,'https://api.github.com/repos/0nionow1/Mukhomor/releases/tags/v0.8.0');assert.equal(options.redirect,'error');return Response.json(data);};
+  const data={tag_name:'v0.8.0',published_at:'2026-10-15T12:00:00Z',draft:false,prerelease:true,assets:[{name:'Mukhomor-0.8.0-android.apk',browser_download_url:'https://github.com/Mukhomo/Mukhomor/releases/download/v0.8.0/Mukhomor-0.8.0-android.apk',size:100}]};
+  const mock=async(url,options)=>{assert.equal(url,'https://api.github.com/repos/Mukhomo/Mukhomor/releases/tags/v0.8.0');assert.equal(options.redirect,'error');return Response.json(data);};
   const imported=await importGithubRelease('v0.8.0',mock);assert.equal(imported.files.length,1);assert.equal(imported.prerelease,true);
   await assert.rejects(importGithubRelease('https://evil.example',mock));
   await assert.rejects(importGithubRelease('0.8.0',async()=>Response.json({...data,draft:true})));

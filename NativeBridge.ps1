@@ -6,6 +6,7 @@ $ErrorActionPreference='Stop'
 [Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 Import-Module (Join-Path $PSScriptRoot 'SplitVpn.psm1') -Force -DisableNameChecking
 Import-Module (Join-Path $PSScriptRoot 'SplitWindows.psm1') -Force -DisableNameChecking
+Import-Module (Join-Path $PSScriptRoot 'Tor.psm1') -DisableNameChecking
 
 function Read-ProfileIndex {
     $path=Join-Path $Root 'private\profiles.json'
@@ -47,7 +48,9 @@ function Get-Snapshot {
     $index=Read-ProfileIndex
     $status=Get-SplitStatus $Root
     $settings=if($null -ne $ValidatedSettings){$ValidatedSettings}else{Get-SplitSettings $Root}
-    return @{profiles=@($index.profiles | ForEach-Object {@{id=$_.id;name=$_.name;protocol=$(if ($_.ContainsKey('protocol')) {$_.protocol} else {'WireGuard / AmneziaWG'})}});selected=$index.selected;last_connected=$index.last_connected;autoconnect=$index.autoconnect;running=($status.running -and !$status.starting);starting=$status.starting;traffic_guard=$status.traffic_guard;dns_recovery_pending=($status.dns_recovery_pending -and !$status.running -and !$status.starting);dns_hosts=$status.dns_hosts;dns_pending=$status.dns_refresh_pending;dns_failed=$status.dns_failed_hosts;settings=$settings}
+    $network=Get-SplitP2PNetwork $Root;$sessionPath=Join-Path $Root 'runtime\session.json'
+    if(Test-Path -LiteralPath $sessionPath){$session=Read-JsonFile $sessionPath;if($session.ContainsKey('transport') -and $session.transport.ContainsKey('network')){$network=$session.transport.network}}
+    return @{network=$network;tor_available=$true;tor_options=(Get-SplitTorOptions $Root);profiles=@($index.profiles | ForEach-Object {@{id=$_.id;name=$_.name;protocol=$(if ($_.ContainsKey('protocol')) {$_.protocol} else {'WireGuard / AmneziaWG'})}});selected=$index.selected;last_connected=$index.last_connected;autoconnect=$index.autoconnect;running=($status.running -and !$status.starting);starting=$status.starting;traffic_guard=$status.traffic_guard;dns_recovery_pending=($status.dns_recovery_pending -and !$status.running -and !$status.starting);dns_hosts=$status.dns_hosts;dns_pending=$status.dns_refresh_pending;dns_failed=$status.dns_failed_hosts;settings=$settings}
 }
 
 function Get-FailureDetails($Failure, [string]$Action) {
@@ -56,7 +59,7 @@ function Get-FailureDetails($Failure, [string]$Action) {
     if ($scriptName -notin @('NativeBridge.ps1','SplitVpn.psm1','SplitWindows.psm1','TrafficGuard.psm1','ProfileImport.psm1')) { $scriptName='' }
     $command=if ($invocation -and $invocation.MyCommand) { [string]$invocation.MyCommand.Name } else { '' }
     if ($command -notmatch '^[A-Za-z][A-Za-z0-9-]{0,100}$') { $command='' }
-    if ($Action -notin @('Init','Snapshot','Import','Select','Rename','Remove','Connect','Disconnect','Recover','Exit','Autoconnect','ValidateSettings','ApplySettings','Update','UpdateDns','Diagnose')) { $Action='Unknown' }
+    if ($Action -notin @('Init','Snapshot','Import','Select','Rename','Remove','Connect','Disconnect','Recover','Exit','Autoconnect','ValidateSettings','ApplySettings','ConfigureTor','Update','UpdateDns','Diagnose')) { $Action='Unknown' }
     $rollback=@()
     if ($Failure.Exception.Data.Contains('MukhomorRollbackFailures')) {
         $rollback=@($Failure.Exception.Data['MukhomorRollbackFailures'] | Where-Object { $_ -in @('dns','core','core-direct','profiles') } | Sort-Object -Unique)
@@ -96,6 +99,11 @@ try {
     [IO.Directory]::CreateDirectory((Join-Path $Root 'private\profiles')) | Out-Null
     $index=Read-ProfileIndex
     $recoveryError=''; $importedCount=0; $appliedIssues=$null
+    $sessionPath=Join-Path $Root 'runtime\session.json'
+    $torActive=$false
+    if(Test-Path -LiteralPath $sessionPath){$session=Read-JsonFile $sessionPath;$torActive=$session.ContainsKey('transport') -and $session.transport.ContainsKey('network') -and $session.transport.network -in @('tor','i2p') -and (Get-OwnedCore $Root)}
+    if(($torActive -or (Test-Path -LiteralPath (Join-Path $Root 'private\tor-mode'))) -and $request.action -eq 'ConfigureTor'){throw 'Disconnect P2P before changing the connection policy'}
+    if($torActive -and $request.action -in @('Select','ApplySettings')){throw 'Disconnect P2P before changing the connection policy'}
     switch ([string]$request.action) {
         'Init' {
             # A crashed service can leave a DNS snapshot. Recover before retrying.
@@ -193,6 +201,16 @@ try {
             Save-ProfileIndex $index; [IO.File]::Delete($path)
         }
         'Connect' {
+            if($request.ContainsKey('network') -and $request.network -notin @('tor','i2p','vps','')){throw 'Unsupported network'}
+            if($request.ContainsKey('network') -and $request.network -in @('tor','i2p')){
+                if((Get-OwnedCore $Root) -and !$torActive){throw 'Disconnect before selecting P2P'}
+                if($torActive -and (Get-SplitP2PNetwork $Root) -ne $request.network){throw 'Disconnect before selecting another P2P network'}
+                if($torActive -and !(Get-SplitStatus $Root).running){throw 'P2P transport stopped; disconnect before reconnecting'}
+                if(!(Get-OwnedCore $Root)){Start-SplitSession $Root $true $request.network}
+                $index.autoconnect=$false;Save-ProfileIndex $index
+                break
+            }
+            if(Test-Path -LiteralPath (Join-Path $Root 'private\tor-mode')){throw 'Disconnect P2P before selecting a VPS'}
             $target=if ($request.ContainsKey('id')) {[string]$request.id}else{$index.selected}
             if (!$target) {throw 'Import and select a server first'}
             $profilePath=Indexed-ProfilePath $index $target
@@ -209,6 +227,7 @@ try {
         'Exit' {Stop-SplitSession $Root -ReleaseGuard}
         'Recover' {Stop-SplitSession $Root}
         'Autoconnect' {$index.autoconnect=[bool]$request.enabled; Save-ProfileIndex $index}
+        'ConfigureTor' {Set-SplitTorOptions $Root $request.tor_options}
         'ValidateSettings' {$validated=Get-SplitSettings $Root $request.settings}
         'ApplySettings' {
             $validated=Get-SplitSettings $Root $request.settings
@@ -217,8 +236,8 @@ try {
             if ($index.selected) {$s=Set-SplitConfig $Root $validated $true -Reload:($null -ne (Get-OwnedCore $Root)) -PassThru -RuleIssues ([ref]$appliedIssues)}
             else {$s=$validated;Write-AtomicJson (Join-Path $Root 'settings.json') $s}
         }
-        'Update' {if (Get-OwnedCore $Root) {Update-SplitRuleSets $Root | Out-Null}; Update-SplitDns $Root -Force | Out-Null}
-        'UpdateDns' {Update-SplitDns $Root | Out-Null}
+        'Update' {if($torActive){break};if (Get-OwnedCore $Root) {Update-SplitRuleSets $Root | Out-Null}; Update-SplitDns $Root -Force | Out-Null}
+        'UpdateDns' {if($torActive){break};Update-SplitDns $Root | Out-Null}
         'Diagnose' {Write-SplitDiagnostics $Root | Out-Null}
         default {throw 'Unsupported operation'}
     }

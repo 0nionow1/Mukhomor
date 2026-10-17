@@ -39,7 +39,7 @@ def address(sock):
     else:
         raise ValueError("Bad SOCKS address")
     port = struct.unpack("!H", exact(sock, 2))[0]
-    return ("203.0.113.10" if host.endswith(".test") else host), port
+    return ("203.0.113.10" if host.endswith((".test",".i2p")) else host), port
 
 
 def server(folder):
@@ -83,9 +83,9 @@ def server(folder):
                 conn.sendall(b"\x05\x00\x00\x01" + socket.inet_aton("192.0.2.2") + struct.pack("!H", 1081))
                 while conn.recv(4096):
                     pass
-    def udp_origin():
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-            sock.bind(("203.0.113.10", 18080))
+    def udp_origin(host="203.0.113.10",port=18080):
+        with socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.bind((host, port))
             while True:
                 packet, peer = sock.recvfrom(65536)
                 sock.sendto(b"udp:" + packet, peer)
@@ -105,10 +105,18 @@ def server(folder):
                     sock.sendto(packet[:10] + data, peer)
     for target in [udp_origin, udp_proxy]:
         threading.Thread(target=target, daemon=True).start()
+    for host,port in [("203.0.113.10",53),("203.0.113.10",853),("2001:db8::10",53),("2001:db8::10",853),("2001:db8::10",18080)]:
+        threading.Thread(target=udp_origin,args=(host,port),daemon=True).start()
     for endpoint, handler in [(("203.0.113.10", 18080), Echo), (("192.0.2.2", 1080), Socks)]:
         service = socketserver.ThreadingTCPServer(endpoint, handler)
         service.daemon_threads = True
         threading.Thread(target=service.serve_forever, daemon=True).start()
+    class TCP6(socketserver.ThreadingTCPServer):address_family=socket.AF_INET6
+    for host,ports in [("203.0.113.10",[53,853]),("2001:db8::10",[53,853,18080])]:
+        for port in ports:
+            service=(TCP6 if ":" in host else socketserver.ThreadingTCPServer)((host,port),Echo)
+            service.daemon_threads=True
+            threading.Thread(target=service.serve_forever,daemon=True).start()
     (folder / "ready").touch()
     threading.Event().wait()
 
@@ -189,7 +197,7 @@ def client(binary, folder):
             except subprocess.TimeoutExpired: process.kill();process.wait()
 
 
-def run(binary):
+def run(binary, tor=False, i2p=False):
     if os.geteuid()!=0: raise SystemExit("Run the namespace test as root")
     token=str(os.getpid())
     client_ns="mukh-c-"+token;server_ns="mukh-s-"+token
@@ -197,6 +205,9 @@ def run(binary):
     def ip(*args): subprocess.run(["ip",*args],check=True,stdout=subprocess.DEVNULL)
     with tempfile.TemporaryDirectory(prefix="mukhomor-network-") as temp:
         folder=Path(temp)
+        if tor or i2p:
+            from tor_fixture import prepare
+            binary=prepare(binary,folder,"i2p" if i2p else "tor")
         if os.environ.get("MUKHOMOR_TEST_UID"):
             os.chown(folder,int(os.environ["MUKHOMOR_TEST_UID"]),int(os.environ["MUKHOMOR_TEST_UID"]))
         try:
@@ -205,14 +216,18 @@ def run(binary):
             ip("link","set","mc"+token,"netns",client_ns);ip("link","set","ms"+token,"netns",server_ns)
             for ns,device,address in [(client_ns,"mc"+token,"192.0.2.1/24"),(server_ns,"ms"+token,"192.0.2.2/24")]:
                 ip("-n",ns,"link","set","lo","up");ip("-n",ns,"addr","add",address,"dev",device);ip("-n",ns,"link","set",device,"up")
+                address6="fd00:1234::1/64" if ns==client_ns else "fd00:1234::2/64"
+                ip("-n",ns,"-6","addr","add",address6,"dev",device,"nodad")
             ip("-n",client_ns,"route","add","default","via","192.0.2.2")
+            ip("-n",client_ns,"-6","route","add","default","via","fd00:1234::2")
             ip("-n",server_ns,"addr","add","203.0.113.10/32","dev","lo")
+            ip("-n",server_ns,"-6","addr","add","2001:db8::10/128","dev","lo","nodad")
             fixture=subprocess.Popen(["ip","netns","exec",server_ns,sys.executable,__file__,"server",temp])
             for _ in range(100):
                 if (folder/"ready").exists():break
                 if fixture.poll() is not None:raise RuntimeError("Network fixture exited")
                 time.sleep(.05)
-            subprocess.run(["ip","netns","exec",client_ns,sys.executable,__file__,"client",str(Path(binary).resolve()),temp],check=True,timeout=180)
+            subprocess.run(["ip","netns","exec",client_ns,sys.executable,__file__,"i2p-client" if i2p else "tor-client" if tor else "client",str(Path(binary).resolve()),temp],check=True,timeout=180)
         finally:
             if fixture is not None:fixture.terminate();fixture.wait(timeout=5)
             for ns in reversed(namespaces):subprocess.run(["ip","netns","del",ns],check=False)
@@ -220,4 +235,7 @@ def run(binary):
 if __name__=="__main__":
     if sys.argv[1]=="server":server(Path(sys.argv[2]))
     elif sys.argv[1]=="client":client(sys.argv[2],Path(sys.argv[3]))
-    else:run(sys.argv[1])
+    elif sys.argv[1] in ("tor-client","i2p-client"):
+        from tor_fixture import client as tor_client
+        tor_client(sys.argv[2],Path(sys.argv[3]),"i2p" if sys.argv[1]=="i2p-client" else "tor")
+    else:run(sys.argv[1],tor="--tor" in sys.argv[2:],i2p="--i2p" in sys.argv[2:])

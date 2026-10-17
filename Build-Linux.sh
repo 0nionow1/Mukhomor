@@ -19,15 +19,29 @@ export CARGO_ENCODED_RUSTFLAGS
 CARGO_ENCODED_RUSTFLAGS=$(printf '%s\037' "${privacy_flags[@]}")
 CARGO_ENCODED_RUSTFLAGS=${CARGO_ENCODED_RUSTFLAGS%$'\037'}
 cargo build --manifest-path native/Cargo.toml --locked --release --bin mukhomor
+python3 tor/prepare.py
+cargo build --manifest-path tor/Cargo.toml --locked --release
+python3 i2p/build.py --platform linux
+python3 i2p/sources.py
+install -m755 target/i2p-sources/linux/native/mukhomor-i2pd "$stage/mukhomor-i2pd"
+python3 pt/prepare.py
+(cd pt && go build -modfile=../target/pt-sources/linux/pt.mod -mod=readonly -trimpath -ldflags='-s -w' -o "$stage/mukhomor-pt" .)
 go test -modfile="$modfile" -mod=readonly -tags=with_gvisor ./core ./cmd/mukhomor-controller
 go build -modfile="$modfile" -mod=readonly -tags=with_gvisor -trimpath -ldflags='-s -w' -o "$stage/mukhomor-controller" ./cmd/mukhomor-controller
 target=${CARGO_TARGET_DIR:-"$repo/native/target"}
 install -m755 "$target/release/mukhomor" "$stage/mukhomor"
+tor_target=${CARGO_TARGET_DIR:-"$repo/tor/target"}
+install -m755 "$tor_target/release/mukhomor-tor" "$stage/mukhomor-tor"
 install -m755 linux/install.sh linux/uninstall.sh "$stage/"
 install -m644 linux/mukhomor.desktop "$stage/"
-install -m644 LICENSE Mihomo-LICENSE.txt Slint-LICENSE.txt Rules-LICENSE.txt Tiny5-LICENSE.txt "$stage/"
+install -m644 Tor-LICENSE.txt LICENSE Mihomo-LICENSE.txt Slint-LICENSE.txt Rules-LICENSE.txt Tiny5-LICENSE.txt "$stage/"
 install -m644 linux/mukhomor.svg "$stage/mukhomor.svg"
 install -m644 docs/platforms.md "$stage/README.md"
+install -m644 docs/tor.md "$stage/Tor.md"
+install -m644 docs/p2p.md "$stage/P2P.md"
+install -m644 i2p/THIRD_PARTY_NOTICES.txt "$stage/I2P-THIRD_PARTY_NOTICES.txt"
+install -m644 tor/THIRD_PARTY_NOTICES.txt "$stage/Tor-THIRD_PARTY_NOTICES.txt"
+install -m644 pt/THIRD_PARTY_NOTICES.txt "$stage/Bridges-THIRD_PARTY_NOTICES.txt"
 mkdir -p "$stage/Source"
 install -m644 Source/mihomo-v1.19.32-source.zip Prepare-PortableCore.py "$stage/Source/"
 install -m644 target/portable-core/linux/source.json "$stage/Source/build.json"

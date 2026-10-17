@@ -274,14 +274,14 @@ impl Host {
                             "Import" => "Конфигурация добавлена",
                             "Rename" => "Название сохранено",
                             "Remove" => "Конфигурация удалена",
-                            "ApplySettings" => "Изменения сохранены",
+                            "ApplySettings" | "ConfigureTor" => "Изменения сохранены",
                             "Update" => "Списки правил обновлены",
                             "Diagnose" if cfg!(windows) => "Проверка завершена. Результаты в журналах.",
                             _ => "",
                         },
                         false,
                     );
-                    if matches!(action.as_str(), "Import" | "Rename" | "Remove") {
+                    if matches!(action.as_str(), "Import" | "Rename" | "Remove" | "ConfigureTor") {
                         if let Some(ui) = self.window.upgrade() {
                             ui.set_dialog(0);
                             if action == "Import" {
@@ -342,21 +342,27 @@ impl Host {
         };
         let locale = self.locale.borrow();
         let phase = self.state.phase();
+        let first_snapshot = !ui.get_loaded();
         ui.set_phase(phase.into());
-        let (status, button) = match phase {
-            "connected" => ("Подключено", "Отключиться"),
-            "connecting" => ("Подключаемся…", "Отменить"),
-            "disconnecting" => ("Отключаем VPN…", "Отключаем…"),
-            "recovery" => ("Требуется восстановление сети", "Вернуть сеть"),
-            "uncertain" => ("Состояние соединения неизвестно", "Вернуть сеть"),
-            "loading" => ("Загружаем состояние…", "Подключиться"),
-            _ => ("Не подключено", "Подключиться"),
-        };
-        ui.set_status_text(locale.text(status).as_ref().into());
-        ui.set_primary_text(locale.text(button).as_ref().into());
+        ui.set_active_network(self.state.connection_network().into());
+        ui.set_active_name(self.state.connection_name().into());
+        ui.set_pending_action(self.state.pending.as_ref().map(|p| p.action.as_str())
+            .unwrap_or_else(|| self.state.snapshot["operation"].as_str().unwrap_or("")).into());
+        ui.set_connection_failed(self.state.connection_failed || phase == "error"
+            || (!self.state.snapshot["last_error"].as_str().unwrap_or("").is_empty()
+                && matches!(self.state.snapshot["last_operation"]["action"].as_str(), Some("Connect" | "Select"))));
+        ui.set_live_profile_switch(cfg!(windows));
+        ui.set_primary_stops_connection(self.state.can_disconnect());
         ui.set_ready(self.state.available());
         ui.set_busy(self.state.busy() || self.updater.installing);
         ui.set_loaded(self.state.loaded);
+        ui.set_tor_enabled(!self.updater.installing && self.state.available() && !self.state.busy());
+        let method=self.state.snapshot["tor_options"]["mode"].as_str().unwrap_or("direct");
+        ui.set_tor_method_label(match method {"obfs4"=>"obfs4".into(),"webtunnel"=>"WebTunnel".into(),"snowflake"=>"Snowflake · CDN77".into(),"snowflake-amp"=>"Snowflake · AMP".into(),_=>locale.text("Без мостов").as_ref().into()});
+        if first_snapshot && mukhomor_ui::state::is_p2p(&self.state.snapshot["network"]) && self.state.can_disconnect() {
+            ui.set_connection_mode(1);
+            ui.set_p2p_selected(self.state.snapshot["network"].as_str().unwrap_or("tor").into());
+        }
         ui.set_primary_enabled(
             !self.updater.installing && phase != "disconnecting"
                 && (self.state.can_disconnect()
@@ -742,10 +748,43 @@ impl Host {
                 }
             }
             "dismiss" => self.notice("", false),
-            "primary" => self.request(
-                json!({"action":if self.state.can_disconnect() {"Disconnect"} else {"Connect"}}),
-            ),
+            "p2p-select" => {
+                if matches!(id, "tor" | "i2p") && self.state.available() && !self.state.busy() && !self.state.can_disconnect() {
+                    ui.set_connection_mode(1);
+                    ui.set_p2p_selected(id.into());
+                    self.notice("", false);
+                }
+            }
+            "tor-options" => {
+                if self.state.available() && !self.state.busy() && !self.state.can_disconnect() {
+                    let saved=&self.state.snapshot["tor_options"];
+                    ui.set_tor_method(match saved["mode"].as_str(){Some("obfs4")=>1,Some("webtunnel")=>2,Some("snowflake")=>3,Some("snowflake-amp")=>4,_=>0});
+                    ui.set_tor_bridges(saved["bridges"].as_str().unwrap_or("").into());
+                    self.notice("",false);ui.set_dialog(12);
+                }
+            }
+            "ConfigureTor" => {
+                let mode=match ui.get_tor_method(){1=>"obfs4",2=>"webtunnel",3=>"snowflake",4=>"snowflake-amp",_=>"direct"};
+                let options=crate::tor_options::TorOptions{mode:mode.into(),bridges:if matches!(mode,"direct"|"snowflake"|"snowflake-amp"){String::new()}else{ui.get_tor_bridges().to_string()}};
+                match options.validate(){Ok(options)=>{self.request(json!({"action":"ConfigureTor","tor_options":options}));},Err(error)=>self.notice(error,true)}
+            }
+            "tor-bridge-website" | "tor-bridge-bot" => {
+                if let Err(error) = open_bridge_source(action == "tor-bridge-bot") { self.notice(error, true); }
+            }
+            "primary" => {
+                if !ui.get_connection_action_enabled() { return; }
+                if self.state.phase() == "uncertain" && !self.state.can_disconnect() {
+                    self.launch(self.state.status_request());
+                } else if self.state.can_disconnect() {
+                    self.request(json!({"action":"Disconnect"}));
+                } else if ui.get_connection_mode() == 1 && ui.get_tor_enabled() {
+                    self.request(json!({"action":"Connect","network":ui.get_p2p_selected().as_str()}));
+                } else if ui.get_connection_mode() == 0 && ui.get_primary_enabled() {
+                    self.request(json!({"action":"Connect"}));
+                }
+            }
             "Select" | "Rename" | "Remove" => {
+                if action == "Select" && (!ui.get_profile_selection_enabled() || id == self.state.selected()) { return; }
                 if self.state.available() && !self.state.busy() {
                     self.request(json!({"action":action,"id":id,"name":text}));
                 }
@@ -994,6 +1033,32 @@ fn read_import(path: &std::path::Path) -> Result<String, String> {
         return Err("Файл конфигурации пуст".into());
     }
     Ok(text.into())
+}
+
+fn open_bridge_source(bot: bool) -> Result<(), &'static str> {
+    // Only fixed official destinations, never a URL supplied in a bridge line.
+    let url = if bot { "https://t.me/GetBridgesBot" } else { "https://bridges.torproject.org/" };
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::UI::Shell::ShellExecuteW;
+        let wide: Vec<u16> = url.encode_utf16().chain(Some(0)).collect();
+        let verb: Vec<u16> = "open".encode_utf16().chain(Some(0)).collect();
+        let result = unsafe { ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), wide.as_ptr(), std::ptr::null(), std::ptr::null(), 1) };
+        if result as isize <= 32 { return Err("Cannot open the bridge website; use bridges.torproject.org"); }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use std::process::{Command, Stdio};
+        let mut child = Command::new("xdg-open").arg(url).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+            .spawn().map_err(|_| "Cannot open the bridge website; use bridges.torproject.org")?;
+        std::thread::spawn(move || { let _ = child.wait(); });
+    }
+    #[cfg(target_os = "android")]
+    {
+        let result = crate::android::call("bridgeWebsite", url).map_err(|_| "Cannot open the bridge website; use bridges.torproject.org")?;
+        if !result.is_empty() { return Err("Cannot open the bridge website; use bridges.torproject.org"); }
+    }
+    Ok(())
 }
 
 pub fn run(root: PathBuf) -> Result<(), String> {
@@ -1442,6 +1507,24 @@ mod tests {
         assert!(requests.lock().unwrap().iter().all(|r| r["action"] == "Status"));
         requests.lock().unwrap().clear();
         host.borrow_mut().refresh(true);
+        {
+            let mut h = host.borrow_mut();
+            h.state.snapshot["running"] = json!(true);
+            h.state.snapshot["network"] = json!("tor");
+            ui.set_connection_mode(2);
+            h.refresh(false);
+            assert_eq!(ui.get_connection_mode(), 2, "polling must not change the open connection tab");
+            assert!(ui.get_status_text().contains("Tor"));
+            assert_eq!(ui.get_primary_text().as_str(), "Отключиться");
+            assert!(ui.get_connection_hint().contains("Вкладка не меняет VPN"));
+            assert!(!ui.get_profile_selection_enabled());
+            h.command("Select", "server-a", "");
+            assert!(h.state.pending.is_none(), "VPS selection cannot change a P2P connection");
+            h.state.snapshot["running"] = json!(false);
+            h.state.snapshot["network"] = json!("vps");
+            ui.set_connection_mode(0);
+            h.refresh(false);
+        }
         {
             let mut h=host.borrow_mut();
             assert!(h.can_install_update());
